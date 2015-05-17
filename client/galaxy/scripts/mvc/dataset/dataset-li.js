@@ -264,15 +264,15 @@ var DatasetListItemView = _super.extend(
 
         // return either: a popupmenu with links to download assoc. meta files (if there are meta files)
         //  or a single download icon-button (if there are no meta files)
-        if( !_.isEmpty( this.model.get( 'meta_files' ) ) ){
+        //if( !_.isEmpty( this.model.get( 'meta_files' ) ) ){
             return this._renderMetaFileDownloadButton();
-        }
+        //}
 
-        return $([
-            '<a class="download-btn icon-btn" href="', this.model.urls.download, '" title="' + _l( 'Download' ) + '">',
-                '<span class="fa fa-floppy-o"></span>',
-            '</a>'
-        ].join( '' ));
+//        return $([
+//            '<a class="download-btn icon-btn" href="', this.model.urls.download, '" title="' + _l( 'Download' ) + '">',
+//                '<span class="fa fa-floppy-o"></span>',
+//            '</a>'
+//        ].join( '' ));
     },
 
     /** Render the download button which opens a dropdown with links to download assoc. meta files (indeces, etc.) */
@@ -286,6 +286,7 @@ var DatasetListItemView = _super.extend(
                 '</a>',
                 '<ul class="dropdown-menu" role="menu" aria-labelledby="dLabel">',
                     '<li><a href="' + urls.download + '">', _l( 'Download dataset' ), '</a></li>',
+                    '<li><a href="javascript:void(0);" onclick="gsUploadByGet({ url : window.location.origin + \'/'  + urls.download + '\'})">', _l( 'Send to GenomeSpace' ), '</a></li>',
                     _.map( this.model.get( 'meta_files' ), function( meta_file ){
                         return [
                             '<li><a href="', urls.meta_download + meta_file.file_type, '">',
