@@ -11,6 +11,11 @@ ${parent.javascripts()}
 
 <%def name="late_javascripts()">
 ${parent.late_javascripts()}
+<script>
+$( document ).ready(function() {
+  $.getScript("https://genomespace.genome.edu.au/jsui/upload/gsuploadwindow.js");
+});
+</script>
 </%def>
 
 ## Masthead
