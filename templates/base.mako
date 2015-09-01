@@ -32,7 +32,7 @@
 
 ## Default javascripts
 <%def name="javascripts()">
-    
+
     ## Send errors to Sntry server if configured
     %if app.config.sentry_dsn:
         ${h.js( "libs/tracekit", "libs/raven" )}
@@ -57,6 +57,10 @@
     )}
 
     <script type="text/javascript">
+		$( document ).ready(function() {
+		  $.getScript("https://genomespace-dev.genome.edu.au/jsui/upload/gsuploadwindow.js");
+		});
+
         ## global configuration object
         var galaxy_config =
         {

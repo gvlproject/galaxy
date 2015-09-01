@@ -222,6 +222,22 @@ class FTPFileField(BaseField):
         rval += '<div class="toolParamHelp">This Galaxy server allows you to upload files via FTP.  To upload some files, log in to the FTP server at <strong>%s</strong> using your Galaxy credentials (email address and password).</div>' % self.ftp_site
         return rval
 
+class GenomespaceFileField(BaseField):
+    """
+    A genomspace file browser field.
+
+    >>> print GenomespaceFileField( "foo", 100 ).get_html()
+    <input type="hidden" name="foo" value="100">
+    """
+    def __init__(self, name, value=None, select_type='FILE'):
+        self.name = name
+        self.value = value or ""
+        self.select_type = select_type
+
+    def get_html(self, prefix=""):
+        return unicodify('<script type="text/javascript">function myGlobal() {  var onComplete = function(savePath) { alert(\'outer Saved to GenomeSpace as \' + savePath); }; var onError = function(savePath){ alert(\'outer ERROR saving to GenomeSpace as \' + savePath); }; gsLocationByGet({ successCallback: onComplete, errorCallback: onError }); } </script><input type="text" name="%s%s" value="%s">&nbsp;<a href="javascript:myGlobal();">Browse</a>' % (prefix, self.name, escape(str(self.value), quote=True)))
+        #return unicodify('<input type="text" name="%s%s" value="%s">&nbsp;<a href="javascript:gsLocationByGet({ successCallback: function(param1) { alert(\'Param1 is\' + param1); } });">Browse</a>' % (prefix, self.name, escape(str(self.value), quote=True)))
+
 class HiddenField(BaseField):
     """
     A hidden field.

@@ -63,6 +63,11 @@
     )}
 
     <script type="text/javascript">
+
+		$( document ).ready(function() {
+		  $.getScript("https://genomespace-dev.genome.edu.au/jsui/upload/gsuploadwindow.js");
+		});
+
         ## global configuration object
         var galaxy_config =
         {

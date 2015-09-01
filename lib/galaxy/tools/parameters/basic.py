@@ -624,6 +624,28 @@ class FTPFileToolParameter( ToolParameter ):
         return None
 
 
+class GenomespaceFileToolParameter(ToolParameter):
+    """
+    Parameter that takes one of two values.
+
+    >>> p = GenomespaceFileToolParameter( None, XML( '<param name="blah" type="hidden" value="wax so rockin"/>' ) )
+    >>> print p.name
+    blah
+    >>> print p.get_html()
+    <input type="hidden" name="blah" value="wax so rockin">
+    """
+    def __init__(self, tool, elem):
+        ToolParameter.__init__(self, tool, elem)
+        self.value = elem.get('value')
+        self.select_type = elem.get('select_type', None)
+
+    def get_html_field(self, trans=None, value=None, other_values={}):
+        return form_builder.GenomespaceFileField(self.name, self.value, self.select_type)
+
+    def get_initial_value(self, trans, context, history=None):
+        return self.value
+
+
 class HiddenToolParameter( ToolParameter ):
     """
     Parameter that takes one of two values.
@@ -2470,6 +2492,7 @@ parameter_types = dict(
     baseurl=BaseURLToolParameter,
     file=FileToolParameter,
     ftpfile=FTPFileToolParameter,
+    genomespacefile=GenomespaceFileToolParameter,
     data=DataToolParameter,
     data_collection=DataCollectionToolParameter,
     library_data=LibraryDatasetToolParameter,
