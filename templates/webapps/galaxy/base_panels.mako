@@ -13,7 +13,7 @@ ${parent.javascripts()}
 ${parent.late_javascripts()}
 <script>
 $( document ).ready(function() {
-  $.getScript("https://genomespace.genome.edu.au/jsui/upload/gsuploadwindow.js");
+  $.getScript("https://genomespace-dev.genome.edu.au/jsui/upload/gsuploadwindow.js");
 });
 </script>
 </%def>

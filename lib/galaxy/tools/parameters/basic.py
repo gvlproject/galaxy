@@ -637,13 +637,29 @@ class GenomespaceFileToolParameter(ToolParameter):
     def __init__(self, tool, elem):
         ToolParameter.__init__(self, tool, elem)
         self.value = elem.get('value')
+        self.size = elem.get( 'size' )
+        self.token_field = elem.get( 'token_field', None )
         self.select_type = elem.get('select_type', None)
 
     def get_html_field(self, trans=None, value=None, other_values={}):
-        return form_builder.GenomespaceFileField(self.name, self.value, self.select_type)
+        return form_builder.GenomespaceFileField(self.name, value, self.size, self.token_field, self.select_type)
+
+    def to_string( self, value, app ):
+        """Convert a value to a string representation suitable for persisting"""
+        if value is None:
+            return ''
+        else:
+            return str( value )
 
     def get_initial_value(self, trans, context, history=None):
         return self.value
+
+    def to_dict( self, trans, view='collection', value_mapper=None, other_values={} ):
+        d = super(GenomespaceFileToolParameter, self).to_dict(trans)
+        d['size'] = self.size
+        d['select_type'] = self.select_type
+        d['token_field'] = self.token_field
+        return d
 
 
 class HiddenToolParameter( ToolParameter ):

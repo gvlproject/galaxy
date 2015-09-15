@@ -1,25 +1,23 @@
 <?xml version="1.0"?>
 <tool name="GenomeSpace Importer" id="genomespace_importer" require_login="True" version="0.0.1">
     <description> - receive data from GenomeSpace</description>
-    <command interpreter="python">genomespace_importer.py
-        --genomespace_site "prod"
-        #assert $__user__, Exception( 'You must be logged in to use this tool.' )
-        #set $username = $__user__.preferences.get( 'genomespace_username', None )
-        #set $token = $__user__.preferences.get( 'genomespace_token', None )
-        #assert None not in ( $username, $token ), Exception( 'You must associate a GenomeSpace OpenID with your account and log in with it.' )
-        --username "${username}"
-        --token "${token}"
-        --json_parameter_file "${output_file1}"
+    <command interpreter="python">gsDownloader.py
+        --server "genomespace-dev.genome.edu.au"
+        --token "${ $genomespace_token }"
+        --download_url "${genomespace_input_file}"
+        --file "${output_file1}"
     </command>
     <inputs check_values="False">
-        <param name="genomespace_input_file" type="genomespacefile" label="Choose Input File from GenomeSpace" select_type="FILE" />
+        <param name="genomespace_input_file" type="genomespacefile" label="Choose Input File from GenomeSpace" select_type="FILE" size="40" token_field="genomespace_token"  />
+        <param name="genomespace_token" type="text" label="Genomespace authentication token" size="40" />
     </inputs>
     <outputs>
-        <data format="input" name="output_file1" metadata_source="input"/>
+        <data format="input" name="output_file1" />
     </outputs>
     <help>
 This Tool allows you to import data from GenomeSpace. You must have logged in using your GenomeSpace OpenID. You can associate your OpenID credentials under the User Preferences panel.
 If you are having trouble with this tool, click here_ to refresh your GenomeSpace token before reporting errors.
+
 .. _here:  ${static_path}/../user/openid_auth?openid_provider=genomespace&amp;auto_associate=True
     </help>
     <options refresh="True"/>

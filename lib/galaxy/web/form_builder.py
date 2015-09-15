@@ -229,14 +229,23 @@ class GenomespaceFileField(BaseField):
     >>> print GenomespaceFileField( "foo", 100 ).get_html()
     <input type="hidden" name="foo" value="100">
     """
-    def __init__(self, name, value=None, select_type='FILE'):
+    def __init__(self, name, value=None, size=None, token_field=None, select_type='FILE'):
         self.name = name
         self.value = value or ""
+        self.size = int( size or 10 )
+        self.token_field = token_field or None
         self.select_type = select_type
 
     def get_html(self, prefix=""):
-        return unicodify('<script type="text/javascript">function myGlobal() {  var onComplete = function(savePath) { alert(\'outer Saved to GenomeSpace as \' + savePath); }; var onError = function(savePath){ alert(\'outer ERROR saving to GenomeSpace as \' + savePath); }; gsLocationByGet({ successCallback: onComplete, errorCallback: onError }); } </script><input type="text" name="%s%s" value="%s">&nbsp;<a href="javascript:myGlobal();">Browse</a>' % (prefix, self.name, escape(str(self.value), quote=True)))
+        #return unicodify('<script type="text/javascript">function myGlobal() {  var onComplete = function(savePath) { alert(\'outer Saved to GenomeSpace as \' + savePath); }; var onError = function(savePath){ alert(\'outer ERROR saving to GenomeSpace as \' + savePath); }; gsLocationByGet({ successCallback: onComplete, errorCallback: onError }); } </script><input type="text" name="%s%s" value="%s">&nbsp;<a href="javascript:myGlobal();">Browse</a>' % (prefix, self.name, escape(str(self.value), quote=True)))
         #return unicodify('<input type="text" name="%s%s" value="%s">&nbsp;<a href="javascript:gsLocationByGet({ successCallback: function(param1) { alert(\'Param1 is\' + param1); } });">Browse</a>' % (prefix, self.name, escape(str(self.value), quote=True)))
+        #return unicodify('<input type="text" name="{0}{1}" value="{2}">&nbsp;<a href="javascript:gsLocationByGet({{ successCallback: function(param1) {{ $(\"{0}{1}").value = param1; }} }});">Browse</a>'.format(prefix, self.name, escape(str(self.value))))
+        return unicodify('<input type="text" name="{0}{1}" value="{2}" size="{3}" >&nbsp;<a href="javascript:gsLocationByGet({{ successCallback: function(config) {{ selector_name = \'{0}{1}\'; selector = \'input[name=\' + selector_name.replace(\'|\', \'\\\\|\') + \']\'; $(selector).val(config.destination); selector_name = \'{0}{4}\'; selector = \'input[name=\' + selector_name.replace(\'|\', \'\\\\|\') + \']\'; $(selector).val(config.token); }} }});">Browse</a>'.format(prefix, self.name, escape(str(self.value), quote=True), self.size, self.token_field))
+
+    def to_dict( self ):
+        return dict(
+            name=self.name,
+            token_field=self.token_field)
 
 class HiddenField(BaseField):
     """
