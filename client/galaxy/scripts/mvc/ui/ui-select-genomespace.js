@@ -1,6 +1,6 @@
 // dependencies
-define(['utils/utils', 'mvc/ui/ui-misc'],
-        function(Utils, Ui) {
+define(['utils/utils', 'mvc/ui/ui-misc', 'mvc/tool/tool-genomespace'],
+        function(Utils, Ui, GenomespaceBrowser) {
 
 /**
  * GenomeSpace file selector
@@ -8,9 +8,7 @@ define(['utils/utils', 'mvc/ui/ui-misc'],
 var View = Backbone.View.extend({
     // initialize
     initialize : function(options) {
-        // Load genomespace dependency
-        $.getScript("https://gsui.genomespace.org/jsui/upload/gsuploadwindow.js");
-        
+
         // link this
         var self = this;
 
@@ -43,7 +41,7 @@ var View = Backbone.View.extend({
     /** Browse GenomeSpace */
     browseGenomeSpace: function(options) {
         var self = this;
-        gsLocationByGet({
+        GenomespaceBrowser.openFileBrowser({
             successCallback: function(data) {
                 self.value(data.destination + "^" + data.token);
             }
