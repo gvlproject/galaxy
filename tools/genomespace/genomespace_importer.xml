@@ -8,8 +8,8 @@
         #assert $input_file, Exception( 'You must select a valid input file.' )
         #assert $token, Exception( 'Invalid token. You must be logged into GenomeSpace through OpenID or select a valid file via the GenomeSpace browse dialog.' )
         #import binascii
-        --token "${token}"
-        encoded_cp "${ binascii.hexlify(str($input_file).encode("utf-8")) }" "${ binascii.hexlify(str($output_file1).encode("utf-8")) }"
+        --token "${ binascii.hexlify(str(token).encode('utf-8')) }"
+        encoded_cp "${ binascii.hexlify(str($input_file).encode('utf-8')) }" "${ binascii.hexlify(str($output_file1).encode('utf-8')) }"
     </command>
     <!-- If using this tool through bioblend, the genomespace_browser parameter should contain the path to the GenomeSpaceFile + the security token
          separated by a ^ as follows: GenomeSpaceFilePath^Token -->
