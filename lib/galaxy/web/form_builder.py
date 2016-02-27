@@ -229,8 +229,6 @@ class FTPFileField(BaseField):
 class GenomespaceFileField(BaseField):
     """
     A genomspace file browser field.
-    >>> print GenomespaceFileField( "foo", 100 ).get_html()
-    <input type="text" name="foo" ...>
     """
     def __init__(self, name, value=None):
         self.name = name

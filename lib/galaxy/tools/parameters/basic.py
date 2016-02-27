@@ -653,15 +653,6 @@ class FTPFileToolParameter( ToolParameter ):
 class GenomespaceFileToolParameter(ToolParameter):
     """
     Parameter that takes one of two values.
-    >>> p = GenomespaceFileToolParameter( None, XML( '<param name="genomespace_input_file"
-                                                      type="genomespacefile"
-                                                      label="..."
-                                                      select_type="FILE" size="40"
-                                                      token_field="genomespace_token" />' ) )
-    >>> print p.name
-    genomespace_input_file
-    >>> print p.get_html()
-    <input type="hidden" name="blah" value="wax so rockin">
     """
 
     def __init__(self, tool, elem):
