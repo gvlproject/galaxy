@@ -236,11 +236,10 @@ class FTPFileField(BaseField):
         rval += '<div class="toolParamHelp">This Galaxy server allows you to upload files via FTP.  To upload some files, log in to the FTP server at <strong>%s</strong> using your Galaxy credentials (email address and password).</div>' % self.ftp_site
         return rval
 
+
 class GenomespaceFileField(BaseField):
     """
     A genomspace file browser field.
-    >>> print GenomespaceFileField( "foo", 100 ).get_html()
-    <input type="text" name="foo" ...>
     """
     def __init__(self, name, value=None):
         self.name = name
@@ -257,6 +256,7 @@ class GenomespaceFileField(BaseField):
     def to_dict( self ):
         return dict(name=self.name,
                     token_field=self.token_field)
+
 
 class HiddenField(BaseField):
     """
