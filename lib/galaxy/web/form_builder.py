@@ -6,7 +6,6 @@ from cgi import escape
 import logging
 from operator import itemgetter
 import os
-from six import string_types
 import time
 
 from galaxy.util import restore_text, relpath, nice_size, unicodify
