@@ -70,3 +70,6 @@ Whoosh==2.4.1+gx1
 
 # Flexible BAM index naming
 pysam==0.8.4+gx1
+
+# GenomeSpace dependencies
+python-genomespaceclient==0.1.6
