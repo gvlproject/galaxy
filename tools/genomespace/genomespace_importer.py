@@ -36,6 +36,34 @@ GENOMESPACE_EXT_TO_GALAXY_EXT = {'rifles': 'rifles',
                                  'gct': 'gct'}
 
 
+def _prepare_json_list( param_list ):
+    """
+    JSON serialization Support functions for exec_before_job hook
+    """
+    rval = []
+    for value in param_list:
+        if isinstance( value, dict ):
+            rval.append( _prepare_json_param_dict( value ) )
+        elif isinstance( value, list ):
+            rval.append( _prepare_json_list( value ) )
+        else:
+            rval.append( str( value ) )
+    return rval
+
+def _prepare_json_param_dict( param_dict ):
+    """
+    JSON serialization Support functions for exec_before_job hook
+    """
+    rval = {}
+    for key, value in param_dict.iteritems():
+        if isinstance( value, dict ):
+            rval[ key ] = _prepare_json_param_dict( value )
+        elif isinstance( value, list ):
+            rval[ key ] = _prepare_json_list( value )
+        else:
+            rval[ key ] = str( value )
+    return rval
+
 def exec_before_job( app, inp_data, out_data, param_dict=None, tool=None ):
     """
     Galaxy override hook
@@ -49,7 +77,7 @@ def exec_before_job( app, inp_data, out_data, param_dict=None, tool=None ):
     if param_dict is None:
         param_dict = {}
     json_params = {}
-    json_params[ 'param_dict' ] = param_dict
+    json_params[ 'param_dict' ] = _prepare_json_param_dict( param_dict )
     json_params[ 'output_data' ] = []
     json_params[ 'job_config' ] = dict( GALAXY_DATATYPES_CONF_FILE=param_dict.get( 'GALAXY_DATATYPES_CONF_FILE' ), GALAXY_ROOT_DIR=param_dict.get( 'GALAXY_ROOT_DIR' ), TOOL_PROVIDED_JOB_METADATA_FILE=galaxy.jobs.TOOL_PROVIDED_JOB_METADATA_FILE )
     json_filename = None
