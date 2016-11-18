@@ -24,6 +24,7 @@ threadpool_kill_thread_limit = 10800
 # Specifies the factory for the universe WSGI application
 paste.app_factory = galaxy.webapps.tool_shed.buildapp:app_factory
 log_level = DEBUG
+use_printdebug = False
 
 # Database connection
 database_file = database/community.sqlite
