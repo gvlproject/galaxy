@@ -1,14 +1,14 @@
 """
 Migration script to create table for storing tool tag associations.
 """
-import datetime
+from __future__ import print_function
+
 import logging
 
 from sqlalchemy import Column, ForeignKey, Integer, MetaData, Table
 
 from galaxy.model.custom_types import TrimmedString
 
-now = datetime.datetime.utcnow
 log = logging.getLogger( __name__ )
 metadata = MetaData()
 
@@ -26,14 +26,14 @@ ToolTagAssociation_table = Table( "tool_tag_association", metadata,
 
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    print __doc__
+    print(__doc__)
     metadata.reflect()
 
     # Create tool_tag_association table
     try:
         ToolTagAssociation_table.create()
-    except Exception, e:
-        log.error( "Creating tool_tag_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating tool_tag_association table failed.")
 
 
 def downgrade(migrate_engine):
@@ -43,5 +43,5 @@ def downgrade(migrate_engine):
     # Drop tool_tag_association table
     try:
         ToolTagAssociation_table.drop()
-    except Exception, e:
-        log.error( "Dropping tool_tag_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping tool_tag_association table failed.")

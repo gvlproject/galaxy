@@ -1,6 +1,8 @@
 """
 Migration script to create missing indexes.  Adding new columns to existing tables via SQLAlchemy does not create the index, even if the column definition includes index=True.
 """
+from __future__ import print_function
+
 import logging
 
 from sqlalchemy import Index, MetaData, Table
@@ -49,7 +51,7 @@ indexes = (
 
 
 def upgrade(migrate_engine):
-    print __doc__
+    print(__doc__)
     metadata.bind = migrate_engine
     metadata.reflect()
     insp = reflection.Inspector.from_engine(migrate_engine)
@@ -62,8 +64,8 @@ def upgrade(migrate_engine):
                 Index( ix, t.c[col] ).create()
             else:
                 pass  # Index already exists, don't recreate.
-        except Exception, e:
-            log.error("Unable to create index '%s': %s" % (ix, str(e)))
+        except Exception:
+            log.exception("Unable to create index '%s'." % ix)
 
 
 def downgrade(migrate_engine):
@@ -75,5 +77,5 @@ def downgrade(migrate_engine):
         try:
             t = Table( table, metadata, autoload=True )
             Index( ix, t.c[col] ).drop()
-        except Exception, e:
-            log.error("Unable to drop index '%s': %s" % (ix, str(e)))
+        except Exception:
+            log.exception("Unable to drop index '%s'." % ix)

@@ -10,16 +10,16 @@ from sqlalchemy import and_
 from sqlalchemy.sql import expression
 from markupsafe import escape
 
-from tool_shed.util import common_util
 from tool_shed.util import encoding_util
 
 from galaxy import model
 from galaxy import util
 from galaxy import web
-from galaxy.managers import workflows
+from galaxy import exceptions
+from galaxy.managers import workflows, histories
 from galaxy.model.item_attrs import UsesItemRatings
 from galaxy.model.mapping import desc
-from galaxy.util import unicodify
+from galaxy.util import unicodify, FILENAME_VALID_CHARS
 from galaxy.util.sanitize_html import sanitize_html
 from galaxy.web import error, url_for
 from galaxy.web.base.controller import BaseUIController, SharableMixin, UsesStoredWorkflowMixin
@@ -27,12 +27,9 @@ from galaxy.web.framework.formbuilder import form
 from galaxy.web.framework.helpers import grids, time_ago, to_unicode
 from galaxy.workflow.extract import extract_workflow
 from galaxy.workflow.extract import summarize
-from galaxy.workflow.modules import MissingToolException
 from galaxy.workflow.modules import module_factory
 from galaxy.workflow.modules import WorkflowModuleInjector
-from galaxy.workflow.render import WorkflowCanvas
-from galaxy.workflow.run import invoke
-from galaxy.workflow.run import WorkflowRunConfig
+from galaxy.workflow.render import WorkflowCanvas, STANDALONE_SVG_TEMPLATE
 
 log = logging.getLogger( __name__ )
 
@@ -248,7 +245,11 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
         # Get workflow by username and slug. Security is handled by the display methods below.
         session = trans.sa_session
         user = session.query( model.User ).filter_by( username=username ).first()
+        if not user:
+            raise web.httpexceptions.HTTPNotFound()
         stored_workflow = trans.sa_session.query( model.StoredWorkflow ).filter_by( user=user, slug=slug, deleted=False ).first()
+        if not stored_workflow:
+            raise web.httpexceptions.HTTPNotFound()
         encoded_id = trans.security.encode_id( stored_workflow.id )
 
         # Display workflow in requested format.
@@ -345,7 +346,7 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
                                     use_panels=use_panels )
 
     @web.expose
-    @web.require_login( "use Galaxy workflows" )
+    @web.require_login( "Share or export Galaxy workflows" )
     def sharing( self, trans, id, **kwargs ):
         """ Handle workflow sharing. """
         session = trans.sa_session
@@ -513,12 +514,19 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
     @web.require_login( "use Galaxy workflows" )
     def gen_image( self, trans, id ):
         stored = self.get_stored_workflow( trans, id, check_ownership=True )
+        try:
+            svg = self._workflow_to_svg_canvas( trans, stored )
+        except Exception:
+            status = 'error'
+            message = 'Galaxy is unable to create the SVG image. Please check your workflow, there might be missing tools.'
+            return trans.fill_template( "/workflow/sharing.mako", use_panels=True, item=stored, status=status, message=message )
         trans.response.set_content_type("image/svg+xml")
-        return self._workflow_to_svg_canvas( trans, stored ).standalone_xml()
+        s = STANDALONE_SVG_TEMPLATE % svg.tostring()
+        return s.encode('utf-8')
 
     @web.expose
     @web.require_login( "use Galaxy workflows" )
-    def copy( self, trans, id ):
+    def copy( self, trans, id, save_as_name=None ):
         # Get workflow to copy.
         stored = self.get_stored_workflow( trans, id, check_ownership=False )
         user = trans.get_user()
@@ -532,7 +540,10 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
 
         # Copy.
         new_stored = model.StoredWorkflow()
-        new_stored.name = "Copy of '%s'" % stored.name
+        if (save_as_name):
+            new_stored.name = '%s' % save_as_name
+        else:
+            new_stored.name = "Copy of '%s'" % stored.name
         new_stored.latest_workflow = stored.latest_workflow
         # Copy annotation.
         annotation_obj = self.get_item_annotation_obj( trans.sa_session, stored.user, stored )
@@ -584,6 +595,50 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
                            value="",
                            help="A description of the workflow; annotation is shown alongside shared or published workflows." )
 
+    @web.json
+    def save_workflow_as(self, trans, workflow_name, workflow_data, workflow_annotation=""):
+        """
+            Creates a new workflow based on Save As command. It is a new workflow, but
+            is created with workflow_data already present.
+        """
+        user = trans.get_user()
+        if workflow_name is not None:
+            workflow_contents_manager = workflows.WorkflowContentsManager(trans.app)
+            stored_workflow = model.StoredWorkflow()
+            stored_workflow.name = workflow_name
+            stored_workflow.user = user
+            self.create_item_slug(trans.sa_session, stored_workflow)
+            workflow = model.Workflow()
+            workflow.name = workflow_name
+            workflow.stored_workflow = stored_workflow
+            stored_workflow.latest_workflow = workflow
+            # Add annotation.
+            workflow_annotation = sanitize_html( workflow_annotation, 'utf-8', 'text/html' )
+            self.add_item_annotation( trans.sa_session, trans.get_user(), stored_workflow, workflow_annotation )
+
+            # Persist
+            session = trans.sa_session
+            session.add( stored_workflow )
+            session.flush()
+
+            try:
+                workflow, errors = workflow_contents_manager.update_workflow_from_dict(
+                    trans,
+                    stored_workflow,
+                    workflow_data,
+                )
+            except workflows.MissingToolsException as e:
+                return dict(
+                    name=e.workflow.name,
+                    message=("This workflow includes missing or invalid tools. "
+                             "It cannot be saved until the following steps are removed or the missing tools are enabled."),
+                    errors=e.errors,
+                )
+            return (trans.security.encode_id(stored_workflow.id))
+        else:
+            # This is an error state, 'save as' must have a workflow_name
+            log.exception("Error in Save As workflow: no name.")
+
     @web.expose
     def delete( self, trans, id=None ):
         """
@@ -618,57 +673,6 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
         return trans.fill_template( "workflow/editor.mako", workflows=workflows, stored=stored, annotation=self.get_item_annotation_str( trans.sa_session, trans.user, stored ) )
 
     @web.json
-    def editor_form_post( self, trans, type=None, content_id=None, annotation=None, label=None, **incoming ):
-        """
-        Accepts a tool state and incoming values, and generates a new tool
-        form and some additional information, packed into a json dictionary.
-        This is used for the form shown in the right pane when a node
-        is selected.
-        """
-        tool_state = incoming.pop( 'tool_state' )
-        module = module_factory.from_dict( trans, {
-            'type': type,
-            'content_id': content_id,
-            'tool_state': tool_state,
-            'label': label or None
-        } )
-        module.update_state( incoming )
-        return {
-            'label': module.label,
-            'tool_state': module.get_state(),
-            'data_inputs': module.get_data_inputs(),
-            'data_outputs': module.get_data_outputs(),
-            'tool_errors': module.get_errors(),
-            'form_html': module.get_config_form(),
-            'annotation': annotation
-        }
-
-    @web.json
-    def get_new_module_info( self, trans, type, **kwargs ):
-        """
-        Get the info for a new instance of a module initialized with default
-        parameters (any keyword arguments will be passed along to the module).
-        Result includes data inputs and outputs, html representation
-        of the initial form, and the initial tool state (with default values).
-        This is called asynchronously whenever a new node is added.
-        """
-        trans.workflow_building_mode = True
-        module = module_factory.new( trans, type, **kwargs )
-        tool_model = None
-        return {
-            'type': module.type,
-            'name': module.get_name(),
-            'content_id': module.get_content_id(),
-            'tool_state': module.get_state(),
-            'tool_model': tool_model,
-            'tooltip': module.get_tooltip( static_path=url_for( '/static' ) ),
-            'data_inputs': module.get_data_inputs(),
-            'data_outputs': module.get_data_outputs(),
-            'form_html': module.get_config_form(),
-            'annotation': ""
-        }
-
-    @web.json
     def load_workflow( self, trans, id ):
         """
         Get the latest Workflow for the StoredWorkflow identified by `id` and
@@ -679,51 +683,6 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
         stored = self.get_stored_workflow( trans, id, check_ownership=True, check_accessible=False )
         workflow_contents_manager = workflows.WorkflowContentsManager(trans.app)
         return workflow_contents_manager.workflow_to_dict( trans, stored, style="editor" )
-
-    @web.json
-    def save_workflow( self, trans, id, workflow_data ):
-        """
-        Save the workflow described by `workflow_data` with id `id`.
-        """
-        # Get the stored workflow
-        stored = self.get_stored_workflow( trans, id )
-        workflow_contents_manager = workflows.WorkflowContentsManager(trans.app)
-        try:
-            workflow, errors = workflow_contents_manager.update_workflow_from_dict(
-                trans,
-                stored,
-                workflow_data,
-                from_editor=True,
-            )
-        except workflows.MissingToolsException as e:
-            return dict(
-                name=e.workflow.name,
-                message="This workflow includes missing or invalid tools. "
-                        "It cannot be saved until the following steps are removed or the missing tools are enabled.",
-                errors=e.errors,
-            )
-
-        if workflow.has_errors:
-            errors.append( "Some steps in this workflow have validation errors" )
-        if workflow.has_cycles:
-            errors.append( "This workflow contains cycles" )
-        if errors:
-            rval = dict( message="Workflow saved, but will not be runnable due to the following errors",
-                         errors=errors )
-        else:
-            rval = dict( message="Workflow saved" )
-        rval['name'] = workflow.name
-        return rval
-
-    @web.expose
-    @web.require_login( "use workflows" )
-    def export( self, trans, id=None, **kwd ):
-        """
-        Handles download/export workflow command.
-        """
-        stored = self.get_stored_workflow( trans, id, check_ownership=False, check_accessible=True )
-
-        return trans.fill_template( "/workflow/export.mako", item=stored, use_panels=True )
 
     @web.expose
     @web.require_login( "use workflows" )
@@ -750,7 +709,7 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
             workflow_name=workflow_dict['name'],
             workflow_description=workflow_dict['annotation'],
             workflow_content=workflow_content,
-            workflow_svg=self._workflow_to_svg_canvas( trans, stored ).standalone_xml()
+            workflow_svg=self._workflow_to_svg_canvas( trans, stored ).tostring()
         )
         # strip() b/c myExperiment XML parser doesn't allow white space before XML; utf-8 handles unicode characters.
         request = unicodify( request_raw.strip(), 'utf-8' )
@@ -815,9 +774,8 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
             # This workflow has a tool that's missing from the distribution
             trans.response.status = 400
             return "Workflow cannot be exported due to missing tools."
-        valid_chars = '.,^_-()[]0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
         sname = stored.name
-        sname = ''.join(c in valid_chars and c or '_' for c in sname)[0:150]
+        sname = ''.join(c in FILENAME_VALID_CHARS and c or '_' for c in sname)[0:150]
         trans.response.headers["Content-Disposition"] = 'attachment; filename="Galaxy-Workflow-%s.ga"' % ( sname )
         trans.response.set_content_type( 'application/galaxy-archive' )
         return stored_dict
@@ -863,7 +821,7 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
                            workflow_name=encoding_util.tool_shed_encode( workflow_name ),
                            open_for_url=True )
             pathspec = [ 'workflow', 'import_workflow' ]
-            workflow_text = common_util.tool_shed_get( trans.app, tool_shed_url, pathspec=pathspec, params=params )
+            workflow_text = util.url_get( tool_shed_url, password_mgr=self.app.tool_shed_registry.url_auth( tool_shed_url ), pathspec=pathspec, params=params )
             import_button = True
         if import_button:
             workflow_data = None
@@ -872,7 +830,7 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
                 # NOTE: blocks the web thread.
                 try:
                     workflow_data = urllib2.urlopen( url ).read()
-                except Exception, e:
+                except Exception as e:
                     message = "Failed to open URL: <b>%s</b><br>Exception: %s" % ( escape( url ), escape( str( e ) ) )
                     status = 'error'
             elif workflow_text:
@@ -899,7 +857,7 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
                 # Convert incoming workflow data from json
                 try:
                     data = json.loads( workflow_data )
-                except Exception, e:
+                except Exception as e:
                     data = None
                     message = "The data content does not appear to be a Galaxy workflow."
                     status = 'error'
@@ -935,7 +893,7 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
                             message += "The workflow requires the following tools that are not available in this Galaxy instance."
                             message += "You can likely install the required tools from one of the Galaxy tool sheds listed below.<br/>"
                             for missing_tool_tup in missing_tool_tups:
-                                missing_tool_id, missing_tool_name, missing_tool_version = missing_tool_tup
+                                missing_tool_id, missing_tool_name, missing_tool_version, step_id = missing_tool_tup
                                 message += "<b>Tool name</b> %s, <b>id</b> %s, <b>version</b> %s<br/>" % (
                                            escape( missing_tool_name ),
                                            escape( missing_tool_id ),
@@ -994,7 +952,7 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
                                     myexperiment_target_url=myexperiment_target_url )
 
     @web.expose
-    def build_from_current_history( self, trans, job_ids=None, dataset_ids=None, dataset_collection_ids=None, workflow_name=None ):
+    def build_from_current_history( self, trans, job_ids=None, dataset_ids=None, dataset_collection_ids=None, workflow_name=None, dataset_names=None, dataset_collection_names=None ):
         user = trans.get_user()
         history = trans.get_history()
         if not user:
@@ -1009,13 +967,19 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
                 history=history
             )
         else:
+            # If there is just one dataset name selected or one dataset collection, these
+            # come through as string types instead of lists. xref #3247.
+            dataset_names = util.listify(dataset_names)
+            dataset_collection_names = util.listify(dataset_collection_names)
             stored_workflow = extract_workflow(
                 trans,
                 user=user,
                 job_ids=job_ids,
                 dataset_ids=dataset_ids,
                 dataset_collection_ids=dataset_collection_ids,
-                workflow_name=workflow_name
+                workflow_name=workflow_name,
+                dataset_names=dataset_names,
+                dataset_collection_names=dataset_collection_names
             )
             # Index page with message
             workflow_id = trans.security.encode_id( stored_workflow.id )
@@ -1025,153 +989,24 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
                                            url_for( controller='workflow', action='run', id=workflow_id ) ) )
 
     @web.expose
-    def run( self, trans, id, history_id=None, hide_fixed_params=False, **kwargs ):
-        stored = self.get_stored_workflow( trans, id, check_ownership=False )
-        user = trans.get_user()
-        if stored.user != user:
-            if trans.sa_session.query( model.StoredWorkflowUserShareAssociation ) \
-                    .filter_by( user=user, stored_workflow=stored ).count() == 0:
-                error( "Workflow is not owned by or shared with current user" )
-        # Get the latest revision
-        workflow = stored.latest_workflow
-        # It is possible for a workflow to have 0 steps
-        if len( workflow.steps ) == 0:
-            error( "Workflow cannot be run because it does not have any steps" )
-        if workflow.has_cycles:
-            error( "Workflow cannot be run because it contains cycles" )
-        if workflow.has_errors:
-            error( "Workflow cannot be run because of validation errors in some steps" )
-        # Build the state for each step
-        errors = {}
-        has_upgrade_messages = False
-        step_version_changes = []
-        # has_errors is never used
-        # has_errors = False
-        saved_history = None
-        if history_id is not None:
-            saved_history = trans.get_history()
-            try:
-                decoded_history_id = trans.security.decode_id( history_id )
-                history = trans.sa_session.query(trans.app.model.History).get(decoded_history_id)
-                if history.user != trans.user and not trans.user_is_admin():
-                    if trans.sa_session.query(trans.app.model.HistoryUserShareAssociation).filter_by(user=trans.user, history=history).count() == 0:
-                        error("History is not owned by or shared with current user")
-                trans.set_history(history)
-            except TypeError:
-                error("Malformed history id ( %s ) specified, unable to decode." % str( history_id ))
-            except:
-                error("That history does not exist.")
-        try:  # use a try/finally block to restore the user's current history
-            default_target_history = trans.get_history()
-            module_injector = WorkflowModuleInjector( trans )
-            scheduled = True
-            if kwargs:
-                # If kwargs were provided, the states for each step should have
-                # been POSTed
-                # List to gather values for the template
-                invocations = []
-                for (kwargs, multi_input_keys) in _expand_multiple_inputs(kwargs):
-                    for step in workflow.steps:
-                        # Extract just the arguments for this step by prefix
-                        p = "%s|" % step.id
-                        l = len(p)
-                        step_args = dict( ( k[l:], v ) for ( k, v ) in kwargs.iteritems() if k.startswith( p ) )
-                        step_errors = module_injector.inject( step, step_args )
-                        if step.upgrade_messages:
-                            has_upgrade_messages = True
-                        if step_errors:
-                            errors[step.id] = step.state.inputs["__errors__"] = step_errors
-                    if 'run_workflow' in kwargs and not errors:
-                        new_history = None
-                        if 'new_history' in kwargs:
-                            if 'new_history_name' in kwargs and kwargs['new_history_name'] != '':
-                                nh_name = kwargs['new_history_name']
-                            else:
-                                nh_name = "History from %s workflow" % workflow.name
-                            instance_inputs = [kwargs[multi_input_key] for multi_input_key in multi_input_keys]
-                            instance_ds_names = [trans.sa_session.query( trans.app.model.HistoryDatasetAssociation ).get( instance_input ).name
-                                                 for instance_input in instance_inputs]
-                            nh_name = '%s%s' % (nh_name, _build_workflow_on_str( instance_ds_names ))
-                            new_history = trans.app.model.History( user=trans.user, name=nh_name )
-                            new_history.copy_tags_from(trans.user, trans.get_history())
-                            trans.sa_session.add( new_history )
-                            target_history = new_history
-                        else:
-                            target_history = default_target_history
-
-                        # Build replacement dict for this workflow execution.
-                        replacement_dict = {}
-                        for k, v in kwargs.iteritems():
-                            if k.startswith('wf_parm|'):
-                                replacement_dict[k[8:]] = v
-
-                        run_config = WorkflowRunConfig(
-                            target_history=target_history,
-                            replacement_dict=replacement_dict,
-                            copy_inputs_to_history=new_history is not None
-                        )
-
-                        outputs, invocation = invoke(
-                            trans=trans,
-                            workflow=workflow,
-                            workflow_run_config=run_config
-                        )
-                        invocation_state = invocation.state
-                        # Just use last invocation - right now not really
-                        # possible to have some invocations scheduled and not
-                        # others.
-                        scheduled = invocation_state == model.WorkflowInvocation.states.SCHEDULED
-                        invocations.append({'outputs': outputs,
-                                            'new_history': new_history})
-                        trans.sa_session.flush()
-                if invocations:
-                    return trans.fill_template( "workflow/run_complete.mako",
-                                                workflow=stored,
-                                                scheduled=scheduled,
-                                                invocations=invocations )
+    def run( self, trans, id, history_id=None, **kwargs ):
+        history = None
+        try:
+            if history_id is not None:
+                history_manager = histories.HistoryManager( trans.app )
+                history = history_manager.get_owned( trans.security.decode_id( history_id ), trans.user, current_history=trans.history )
             else:
-                # Prepare each step
-                missing_tools = []
-                for step in workflow.steps:
-                    try:
-                        module_injector.inject( step )
-                    except MissingToolException:
-                        if step.tool_id not in missing_tools:
-                            missing_tools.append(step.tool_id)
-                        continue
-                    if step.upgrade_messages:
-                        has_upgrade_messages = True
-                    if step.type == 'tool' or step.type is None:
-                        if step.module.version_changes:
-                            step_version_changes.extend(step.module.version_changes)
-                        # Error dict
-                        if step.tool_errors:
-                            errors[step.id] = step.tool_errors
-                if missing_tools:
-                    stored.annotation = self.get_item_annotation_str( trans.sa_session, trans.user, stored )
-                    return trans.fill_template(
-                        "workflow/missing_tools.mako",
-                        workflow=stored,
-                        missing_tools=missing_tools
-                    )
-            # Render the form
-            stored.annotation = self.get_item_annotation_str( trans.sa_session, trans.user, stored )
-            return trans.fill_template(
-                "workflow/run.mako",
-                steps=workflow.steps,
-                workflow=stored,
-                has_upgrade_messages=has_upgrade_messages,
-                step_version_changes=step_version_changes,
-                errors=errors,
-                incoming=kwargs,
-                history_id=history_id,
-                hide_fixed_params=hide_fixed_params,
-                enable_unique_defaults=trans.app.config.enable_unique_workflow_defaults
-            )
-        finally:
-            # restore the active history
-            if saved_history is not None:
-                trans.set_history(saved_history)
+                history = trans.get_history()
+            if history is None:
+                raise exceptions.MessageException( 'History unavailable. Please specify a valid history id' )
+        except Exception as e:
+            raise exceptions.MessageException( '[history_id=%s] Failed to retrieve history. %s.' % ( history_id, str( e ) ) )
+        trans.history = history
+        workflow_manager = workflows.WorkflowsManager( trans.app )
+        workflow_contents_manager = workflows.WorkflowContentsManager( trans.app )
+        stored = workflow_manager.get_stored_accessible_workflow( trans, id )
+        workflow_dict = workflow_contents_manager.workflow_to_dict( trans, stored, style='run' )
+        return trans.fill_template( 'workflow/run.mako', workflow_dict=workflow_dict )
 
     def get_item( self, trans, id ):
         return self.get_stored_workflow( trans, id )
@@ -1291,7 +1126,6 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
     def _workflow_to_svg_canvas( self, trans, stored ):
         workflow = stored.latest_workflow
         workflow_canvas = WorkflowCanvas()
-        canvas = workflow_canvas.canvas
         for step in workflow.steps:
             # Load from database representation
             module = module_factory.from_workflow_step( trans, step )
@@ -1304,10 +1138,8 @@ class WorkflowController( BaseUIController, SharableMixin, UsesStoredWorkflowMix
                 module_data_inputs,
                 module_data_outputs,
             )
-
-        workflow_canvas.add_steps( )
-        workflow_canvas.finish(  )
-        return canvas
+        workflow_canvas.add_steps()
+        return workflow_canvas.finish()
 
 
 def _build_workflow_on_str(instance_ds_names):

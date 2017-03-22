@@ -80,7 +80,7 @@ class ExternalServiceAction( object ):
         return handled_results
 
     def perform_action( self, param_dict ):
-        raise 'Abstract Method'
+        raise Exception( 'Abstract Method' )
 
 
 class ExternalServiceResult( object ):
@@ -90,7 +90,7 @@ class ExternalServiceResult( object ):
 
     @property
     def content( self ):
-        raise 'Abstract Method'
+        raise Exception( 'Abstract Method' )
 
 
 class ExternalServiceWebAPIActionResult( ExternalServiceResult ):
@@ -174,6 +174,7 @@ class ExternalServiceTemplateAction( ExternalServiceAction ):
 
     def perform_action( self, param_dict ):
         return ExternalServiceValueResult( self.name, param_dict, self.template.build_template( param_dict ) )
+
 
 action_type_to_class = {
     ExternalServiceWebAction.type: ExternalServiceWebAction,

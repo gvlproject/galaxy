@@ -2,12 +2,16 @@
 API operations on the library datasets.
 """
 import glob
+import logging
 import os
 import os.path
 import string
 import sys
 import tempfile
 import zipfile
+from json import dumps
+
+from paste.httpexceptions import HTTPBadRequest, HTTPInternalServerError
 
 from galaxy import exceptions
 from galaxy import util
@@ -15,15 +19,12 @@ from galaxy import web
 from galaxy.exceptions import ObjectNotFound
 from galaxy.managers import folders, roles
 from galaxy.tools.actions import upload_common
-from galaxy.util.json import dumps
+from galaxy.tools.parameters import populate_state
 from galaxy.util.streamball import StreamBall
 from galaxy.web import _future_expose_api as expose_api
 from galaxy.web import _future_expose_api_anonymous as expose_api_anonymous
 from galaxy.web.base.controller import BaseAPIController, UsesVisualizationMixin
-from paste.httpexceptions import HTTPBadRequest, HTTPInternalServerError
 
-
-import logging
 log = logging.getLogger( __name__ )
 
 
@@ -404,8 +405,8 @@ class LibraryDatasetsController( BaseAPIController, UsesVisualizationMixin ):
         """
         if payload:
             kwd.update(payload)
-        kwd[ 'space_to_tab' ] = 'False'
-        kwd[ 'to_posix_lines' ] = 'True'
+        kwd['space_to_tab'] = False
+        kwd['to_posix_lines'] = True
         kwd[ 'dbkey' ] = kwd.get( 'dbkey', '?' )
         kwd[ 'file_type' ] = kwd.get( 'file_type', 'auto' )
         kwd['link_data_only'] = 'link_to_files' if util.string_as_bool( kwd.get( 'link_data', False ) ) else 'copy_files'
@@ -451,7 +452,7 @@ class LibraryDatasetsController( BaseAPIController, UsesVisualizationMixin ):
         tool_id = 'upload1'
         tool = trans.app.toolbox.get_tool( tool_id )
         state = tool.new_state( trans )
-        tool.populate_state( trans, tool.inputs, kwd, state.inputs )
+        populate_state( trans, tool.inputs, kwd, state.inputs )
         tool_params = state.inputs
         dataset_upload_inputs = []
         for input in tool.inputs.itervalues():
@@ -709,9 +710,8 @@ class LibraryDatasetsController( BaseAPIController, UsesVisualizationMixin ):
                 fStat = os.stat( dataset.file_name )
                 trans.response.set_content_type( ldda.get_mime() )
                 trans.response.headers[ 'Content-Length' ] = int( fStat.st_size )
-                valid_chars = '.,^_-()[]0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
                 fname = ldda.name
-                fname = ''.join( c in valid_chars and c or '_' for c in fname )[ 0:150 ]
+                fname = ''.join( c in util.FILENAME_VALID_CHARS and c or '_' for c in fname )[ 0:150 ]
                 trans.response.headers[ "Content-Disposition" ] = 'attachment; filename="%s"' % fname
                 try:
                     return open( dataset.file_name )

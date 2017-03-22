@@ -1,9 +1,9 @@
 """
 Tool Parameter specific sanitizing.
 """
-
 import logging
 import string
+
 from six import string_types
 
 import galaxy.util
@@ -100,7 +100,7 @@ class ToolParameterSanitizer( object ):
             if split_name.startswith( 'string.' ):
                 try:
                     value = eval( split_name )
-                except NameError, e:
+                except NameError as e:
                     log.debug( 'Invalid string preset specified: %s' % e )
             elif split_name in cls.VALID_PRESET:
                 value = cls.VALID_PRESET[ split_name ]
@@ -130,19 +130,9 @@ class ToolParameterSanitizer( object ):
     def restore_text( self, text ):
         """Restores sanitized text"""
         if self.sanitize:
-            for key, value in self._mapped_chars.iteritems():
+            for key, value in self._mapped_chars.items():
                 text = text.replace( value, key )
         return text
-
-    def restore_param( self, value ):
-        if self.sanitize:
-            if isinstance( value, string_types ):
-                return self.restore_text( value )
-            elif isinstance( value, list ):
-                return map( self.restore_text, value )
-            else:
-                raise Exception('Unknown parameter type (%s:%s)' % ( type( value ), value ))
-        return value
 
     def sanitize_text( self, text ):
         """Restricts the characters that are allowed in a text"""
@@ -165,6 +155,6 @@ class ToolParameterSanitizer( object ):
         if isinstance( value, string_types ):
             return self.sanitize_text( value )
         elif isinstance( value, list ):
-            return map( self.sanitize_text, value )
+            return list( map( self.sanitize_text, value ) )
         else:
             raise Exception('Unknown parameter type (%s:%s)' % ( type( value ), value ))

@@ -1,26 +1,24 @@
+import hashlib
 import logging
 import os
 import re
 import shutil
 import stat
-from string import Template
 import tarfile
 import tempfile
-import time
-import urllib2
 import zipfile
-import hashlib
-
-from galaxy.util import asbool
-from galaxy.util.template import fill_template
-
-from tool_shed.util import basic_util
-from tool_shed.util import tool_dependency_util
-from tool_shed.galaxy_install.tool_dependencies.env_manager import EnvManager
+from string import Template
 
 # TODO: eliminate the use of fabric here.
-from fabric.api import settings
-from fabric.api import lcd
+from fabric.api import lcd, settings
+
+from galaxy.util import (
+    asbool,
+    download_to_file
+)
+from galaxy.util.template import fill_template
+from tool_shed.galaxy_install.tool_dependencies.env_manager import EnvManager
+from tool_shed.util import basic_util, tool_dependency_util
 
 log = logging.getLogger( __name__ )
 
@@ -82,7 +80,7 @@ class CompressedFile( object ):
                     if os.path.exists( absolute_filepath ):
                         os.chmod( absolute_filepath, unix_permissions )
                     else:
-                        log.warn("Unable to change permission on extracted file '%s' as it does not exist" % absolute_filepath)
+                        log.warning("Unable to change permission on extracted file '%s' as it does not exist" % absolute_filepath)
         return os.path.abspath( os.path.join( extraction_path, common_prefix ) )
 
     def getmembers_tar( self ):
@@ -149,44 +147,22 @@ class Download( object ):
 
     def url_download( self, install_dir, downloaded_file_name, download_url, extract=True, checksums={} ):
         """
-            The given download_url can have an extension like #md5#, #sha256#, (or #md5= to support pypi defaults).
+        The given download_url can have an extension like #md5#, #sha256#, (or #md5= to support pypi defaults).
 
-                https://pypi.python.org/packages/source/k/khmer/khmer-1.0.tar.gz#md5#b60639a8b2939836f66495b9a88df757
+            https://pypi.python.org/packages/source/k/khmer/khmer-1.0.tar.gz#md5#b60639a8b2939836f66495b9a88df757
 
-            Alternatively, to not break HTTP spec, you can specify md5 and
-            sha256 as keys in the <action /> element.
+        Alternatively, to not break HTTP spec, you can specify md5 and
+        sha256 as keys in the <action /> element.
 
-            This indicates a checksum which will be checked after download.
-            If the checksum does not match an exception is thrown.
+        This indicates a checksum which will be checked after download.
+        If the checksum does not match an exception is thrown.
         """
         file_path = os.path.join( install_dir, downloaded_file_name )
-        src = None
-        dst = None
-
-        # Set a timer so we don't sit here forever.
-        start_time = time.time()
         try:
-            src = urllib2.urlopen( download_url )
-            dst = open( file_path, 'wb' )
-            while True:
-                chunk = src.read( basic_util.CHUNK_SIZE )
-                if chunk:
-                    dst.write( chunk )
-                else:
-                    break
-                time_taken = time.time() - start_time
-                if time_taken > basic_util.NO_OUTPUT_TIMEOUT:
-                    err_msg = 'Downloading from URL %s took longer than the defined timeout period of %.1f seconds.' % \
-                        ( str( download_url ), basic_util.NO_OUTPUT_TIMEOUT )
-                    raise Exception( err_msg )
-        except Exception, e:
-            err_msg = err_msg = 'Error downloading from URL\n%s:\n%s' % ( str( download_url ), str( e ) )
+            download_to_file( download_url, file_path, chunk_size=basic_util.CHUNK_SIZE)
+        except Exception as e:
+            err_msg = 'Error downloading from URL %s : %s' % ( str( download_url ), str( e ) )
             raise Exception( err_msg )
-        finally:
-            if src:
-                src.close()
-            if dst:
-                dst.close()
 
         if 'sha256sum' in checksums or '#sha256#' in download_url:
             downloaded_checksum = hashlib.sha256(open(file_path, 'rb').read()).hexdigest().lower()
@@ -231,7 +207,7 @@ class Download( object ):
         return rval
 
     def get_dict_checksums( self, dct ):
-        return dict(filter(lambda i: i[0] in ['md5sum', 'sha256sum'], dct.iteritems()))
+        return dict(i for i in dct.items() if i[0] in ['md5sum', 'sha256sum'])
 
 
 class RecipeStep( object ):
@@ -239,10 +215,10 @@ class RecipeStep( object ):
 
     def execute_step( self, tool_dependency, package_name, actions, action_dict, filtered_actions, env_file_builder,
                       install_environment, work_dir, current_dir=None, initial_download=False ):
-        raise "Unimplemented Method"
+        raise Exception( "Unimplemented Method")
 
     def prepare_step( self, tool_dependency, action_elem, action_dict, install_environment, is_binary_download ):
-        raise "Unimplemented Method"
+        raise Exception( "Unimplemented Method" )
 
 
 class AssertDirectoryExecutable( RecipeStep ):
@@ -303,7 +279,8 @@ class AssertDirectoryExists( RecipeStep ):
     def assert_directory_exists( self, full_path ):
         """
         Return True if a symbolic link or directory exists, but if full_path is a file,
-        return False.    """
+        return False.
+        """
         if full_path is None:
             return False
         if os.path.isfile( full_path ):
@@ -594,10 +571,10 @@ class DownloadBinary( Download, RecipeStep ):
         # Get the target directory for this download if the user has specified one. Default to the root of $INSTALL_DIR.
         target_directory = action_dict.get( 'target_directory', None )
         # Attempt to download a binary from the specified URL.
-        log.debug( 'Attempting to download from %s to %s', url, str( target_directory ) )
         downloaded_filename = None
         try:
             checksums = self.get_dict_checksums( action_dict )
+            log.debug( 'Attempting to download from %s to %s', url, str( target_directory ) )
             downloaded_filename = self.download_binary( url, work_dir, checksums )
             if initial_download:
                 # Filter out any actions that are not download_binary, chmod, or set_environment.
@@ -605,7 +582,7 @@ class DownloadBinary( Download, RecipeStep ):
                 # Set actions to the same, so that the current download_binary doesn't get re-run in the
                 # next stage.  TODO: this may no longer be necessary...
                 actions = [ item for item in filtered_actions ]
-        except Exception, e:
+        except Exception as e:
             log.exception( str( e ) )
             if initial_download:
                 # No binary exists, or there was an error downloading the binary from the generated URL.
@@ -650,7 +627,7 @@ class DownloadBinary( Download, RecipeStep ):
             url_template_elem = tool_dependency_util.get_download_url_for_platform( url_template_elems, platform_info_dict )
         else:
             url_template_elem = url_template_elems[ 0 ]
-        action_dict[ 'url' ] = Template( url_template_elem.text ).safe_substitute( platform_info_dict )
+        action_dict[ 'url' ] = Template( url_template_elem.text.strip() ).safe_substitute( platform_info_dict )
         action_dict[ 'target_directory' ] = action_elem.get( 'target_directory', None )
         action_dict.update( self.get_elem_checksums( action_elem ) )
         return action_dict
@@ -675,7 +652,6 @@ class DownloadByUrl( Download, RecipeStep ):
             filtered_actions = actions[ 1: ]
         url = action_dict[ 'url' ]
         is_binary = action_dict.get( 'is_binary', False )
-        log.debug( 'Attempting to download via url: %s', url )
         if 'target_filename' in action_dict:
             # Sometimes compressed archives extract their content to a folder other than the default
             # defined file name.  Using this attribute will ensure that the file name is set appropriately
@@ -685,6 +661,7 @@ class DownloadByUrl( Download, RecipeStep ):
             downloaded_filename = os.path.split( url )[ -1 ]
 
         checksums = self.get_dict_checksums( action_dict )
+        log.debug( 'Attempting to download via url: %s', url )
         dir = self.url_download( work_dir, downloaded_filename, url, extract=True, checksums=checksums )
         if is_binary:
             log_file = os.path.join( install_environment.install_dir, basic_util.INSTALLATION_LOG )
@@ -710,7 +687,7 @@ class DownloadByUrl( Download, RecipeStep ):
         if is_binary_download:
             action_dict[ 'is_binary' ] = True
         if action_elem.text:
-            action_dict[ 'url' ] = action_elem.text
+            action_dict[ 'url' ] = action_elem.text.strip()
             target_filename = action_elem.get( 'target_filename', None )
             if target_filename:
                 action_dict[ 'target_filename' ] = target_filename
@@ -747,6 +724,7 @@ class DownloadFile( Download, RecipeStep ):
         if current_dir is not None:
             work_dir = current_dir
         checksums = self.get_dict_checksums( action_dict )
+        log.debug( 'Attempting to download via url: %s', url )
         self.url_download( work_dir, filename, url, extract=action_dict[ 'extract' ], checksums=checksums )
         if initial_download:
             dir = os.path.curdir
@@ -756,7 +734,7 @@ class DownloadFile( Download, RecipeStep ):
     def prepare_step( self, tool_dependency, action_elem, action_dict, install_environment, is_binary_download ):
         # <action type="download_file">http://effectors.org/download/version/TTSS_GUI-1.0.1.jar</action>
         if action_elem.text:
-            action_dict[ 'url' ] = action_elem.text
+            action_dict[ 'url' ] = action_elem.text.strip()
             target_filename = action_elem.get( 'target_filename', None )
             if target_filename:
                 action_dict[ 'target_filename' ] = target_filename
@@ -846,23 +824,17 @@ class MoveDirectoryFiles( RecipeStep ):
 
     def move_directory_files( self, current_dir, source_dir, destination_dir ):
         source_directory = os.path.abspath( os.path.join( current_dir, source_dir ) )
-        destination_directory = os.path.join( destination_dir )
-        if not os.path.isdir( destination_directory ):
-            os.makedirs( destination_directory )
-        symlinks = []
-        regular_files = []
-        for file_name in os.listdir( source_directory ):
-            source_file = os.path.join( source_directory, file_name )
-            destination_file = os.path.join( destination_directory, file_name )
-            files_tuple = ( source_file, destination_file )
-            if os.path.islink( source_file ):
-                symlinks.append( files_tuple )
+        destination_directory = os.path.abspath(os.path.join(destination_dir))
+        if not os.path.isdir(destination_directory):
+            os.makedirs(destination_directory)
+        for dir_entry in os.listdir(source_directory):
+            source_entry = os.path.join(source_directory, dir_entry)
+            if os.path.islink(source_entry):
+                destination_entry = os.path.join(destination_directory, dir_entry)
+                os.symlink(os.readlink(source_entry), destination_entry)
+                os.remove(source_entry)
             else:
-                regular_files.append( files_tuple )
-        for source_file, destination_file in symlinks:
-            shutil.move( source_file, destination_file )
-        for source_file, destination_file in regular_files:
-            shutil.move( source_file, destination_file )
+                shutil.move(source_entry, destination_directory)
 
     def prepare_step( self, tool_dependency, action_elem, action_dict, install_environment, is_binary_download ):
         # <action type="move_directory_files">
@@ -919,20 +891,20 @@ class RegexReplace( RecipeStep ):
         filtered_actions and dir.
 
         This step supports the full range of python's regular expression engine, including backreferences in
-        the replacement text.
+        the replacement text. Example::
 
-        Example:
-        <action type="regex_replace" filename="Makefile">
-            <regex>^CFLAGS(\s*)=\s*-g\s*-Wall\s*-O2\s*$$</regex>
-            <replacement>CFLAGS\1= -g -Wall -O2 -I$$(NCURSES_INCLUDE_PATH)/ncurses/ -I$$(NCURSES_INCLUDE_PATH) -L$$(NCURSES_LIB_PATH)</replacement>
-        </action>
+            <action type="regex_replace" filename="Makefile">
+                <regex>^CFLAGS(\s*)=\s*-g\s*-Wall\s*-O2\s*$$</regex>
+                <replacement>CFLAGS\1= -g -Wall -O2 -I$$(NCURSES_INCLUDE_PATH)/ncurses/ -I$$(NCURSES_INCLUDE_PATH) -L$$(NCURSES_LIB_PATH)</replacement>
+            </action>
 
-        Before:
-        CFLAGS  = -g -Wall -O2
+        Before::
 
-        After:
-        CFLAGS  = -g -Wall -O2 -I$(NCURSES_INCLUDE_PATH)/ncurses/ -I$(NCURSES_INCLUDE_PATH) -L$(NCURSES_LIB_PATH)
+            CFLAGS  = -g -Wall -O2
 
+        After::
+
+            CFLAGS  = -g -Wall -O2 -I$(NCURSES_INCLUDE_PATH)/ncurses/ -I$(NCURSES_INCLUDE_PATH) -L$(NCURSES_LIB_PATH)
         """
         log_file = os.path.join( install_environment.install_dir, basic_util.INSTALLATION_LOG )
         if os.path.exists( log_file ):
@@ -1019,20 +991,19 @@ class SetEnvironment( RecipeStep ):
 
         The first tag set defines a complex repository dependency like this.  This tag set ensures that changeset
         revision XXX of the repository named package_graphicsmagick_1_3 owned by YYY in the tool shed ZZZ has been
-        previously installed.
+        previously installed::
 
-        <tool_dependency>
-            <package name="graphicsmagick" version="1.3.18">
-                <repository changeset_revision="XXX" name="package_graphicsmagick_1_3" owner="YYY" prior_installation_required="True" toolshed="ZZZ" />
-            </package>
-            ...
+            <tool_dependency>
+                <package name="graphicsmagick" version="1.3.18">
+                    <repository changeset_revision="XXX" name="package_graphicsmagick_1_3" owner="YYY" prior_installation_required="True" toolshed="ZZZ" />
+                </package>
+                ...
 
-        * By the way, there is an env.sh file associated with version 1.3.18 of the graphicsmagick package which looks
-        something like this (we'll reference this file later in this discussion.
-        ----
-        GRAPHICSMAGICK_ROOT_DIR=/<my configured tool dependency path>/graphicsmagick/1.3.18/YYY/package_graphicsmagick_1_3/XXX/gmagick;
-        export GRAPHICSMAGICK_ROOT_DIR
-        ----
+        By the way, there is an env.sh file associated with version 1.3.18 of the graphicsmagick package which looks
+        something like this (we'll reference this file later in this discussion)::
+
+            GRAPHICSMAGICK_ROOT_DIR=/<my configured tool dependency path>/graphicsmagick/1.3.18/YYY/package_graphicsmagick_1_3/XXX/gmagick;
+            export GRAPHICSMAGICK_ROOT_DIR
 
         The second tag set defines a specific package dependency that has been previously installed (guaranteed by the
         tag set discussed above) and compiled, where the compiled dependency is needed by the tool dependency currently
@@ -1041,44 +1012,42 @@ class SetEnvironment( RecipeStep ):
         version 2.0.0 of the osra package requires version 1.3.18 of the graphicsmagick package in order to successfully
         compile.  When this tag set is handled, one of the effects is that the env.sh file associated with graphicsmagick
         version 1.3.18 is "sourced", which undoubtedly sets or alters certain environment variables (e.g. PATH, PYTHONPATH,
-        etc).
+        etc)::
 
-        <!-- populate the environment variables from the dependent repositories -->
-        <action type="set_environment_for_install">
-            <repository changeset_revision="XXX" name="package_graphicsmagick_1_3" owner="YYY" toolshed="ZZZ">
-                <package name="graphicsmagick" version="1.3.18" />
-            </repository>
-        </action>
+            <!-- populate the environment variables from the dependent repositories -->
+            <action type="set_environment_for_install">
+                <repository changeset_revision="XXX" name="package_graphicsmagick_1_3" owner="YYY" toolshed="ZZZ">
+                    <package name="graphicsmagick" version="1.3.18" />
+                </repository>
+            </action>
 
         The third tag set enables discovery of the same required package dependency discussed above for correctly compiling
         the osra version 2.0.0 package, but in this case the package can be discovered at tool execution time.  Using the
         $ENV[] option as shown in this example, the value of the environment variable named GRAPHICSMAGICK_ROOT_DIR (which
         was set in the environment using the second tag set described above) will be used to automatically alter the env.sh
         file associated with the osra version 2.0.0 tool dependency when it is installed into Galaxy.  * Refer to where we
-        discussed the env.sh file for version 1.3.18 of the graphicsmagick package above.
+        discussed the env.sh file for version 1.3.18 of the graphicsmagick package above::
 
-        <action type="set_environment">
-            <environment_variable action="prepend_to" name="LD_LIBRARY_PATH">$ENV[GRAPHICSMAGICK_ROOT_DIR]/lib/</environment_variable>
-            <environment_variable action="prepend_to" name="LD_LIBRARY_PATH">$INSTALL_DIR/potrace/build/lib/</environment_variable>
-            <environment_variable action="prepend_to" name="PATH">$INSTALL_DIR/bin</environment_variable>
-            <!-- OSRA_DATA_FILES is only used by the galaxy wrapper and is not part of OSRA -->
-            <environment_variable action="set_to" name="OSRA_DATA_FILES">$INSTALL_DIR/share</environment_variable>
-        </action>
+            <action type="set_environment">
+                <environment_variable action="prepend_to" name="LD_LIBRARY_PATH">$ENV[GRAPHICSMAGICK_ROOT_DIR]/lib/</environment_variable>
+                <environment_variable action="prepend_to" name="LD_LIBRARY_PATH">$INSTALL_DIR/potrace/build/lib/</environment_variable>
+                <environment_variable action="prepend_to" name="PATH">$INSTALL_DIR/bin</environment_variable>
+                <!-- OSRA_DATA_FILES is only used by the galaxy wrapper and is not part of OSRA -->
+                <environment_variable action="set_to" name="OSRA_DATA_FILES">$INSTALL_DIR/share</environment_variable>
+            </action>
 
         The above tag will produce an env.sh file for version 2.0.0 of the osra package when it it installed into Galaxy
         that looks something like this.  Notice that the path to the gmagick binary is included here since it expands the
-        defined $ENV[GRAPHICSMAGICK_ROOT_DIR] value in the above tag set.
+        defined $ENV[GRAPHICSMAGICK_ROOT_DIR] value in the above tag set::
 
-        ----
-        LD_LIBRARY_PATH=/<my configured tool dependency path>/graphicsmagick/1.3.18/YYY/package_graphicsmagick_1_3/XXX/gmagick/lib/:$LD_LIBRARY_PATH;
-        export LD_LIBRARY_PATH
-        LD_LIBRARY_PATH=/<my configured tool dependency path>/osra/1.4.0/YYY/depends_on/XXX/potrace/build/lib/:$LD_LIBRARY_PATH;
-        export LD_LIBRARY_PATH
-        PATH=/<my configured tool dependency path>/osra/1.4.0/YYY/depends_on/XXX/bin:$PATH;
-        export PATH
-        OSRA_DATA_FILES=/<my configured tool dependency path>/osra/1.4.0/YYY/depends_on/XXX/share;
-        export OSRA_DATA_FILES
-        ----
+            LD_LIBRARY_PATH=/<my configured tool dependency path>/graphicsmagick/1.3.18/YYY/package_graphicsmagick_1_3/XXX/gmagick/lib/:$LD_LIBRARY_PATH;
+            export LD_LIBRARY_PATH
+            LD_LIBRARY_PATH=/<my configured tool dependency path>/osra/1.4.0/YYY/depends_on/XXX/potrace/build/lib/:$LD_LIBRARY_PATH;
+            export LD_LIBRARY_PATH
+            PATH=/<my configured tool dependency path>/osra/1.4.0/YYY/depends_on/XXX/bin:$PATH;
+            export PATH
+            OSRA_DATA_FILES=/<my configured tool dependency path>/osra/1.4.0/YYY/depends_on/XXX/share;
+            export OSRA_DATA_FILES
         """
         env_var_value = env_var_dict[ 'value' ]
         # env_var_value is the text of an environment variable tag like this:
@@ -1180,7 +1149,7 @@ class SetupPerlEnvironment( Download, RecipeStep ):
 
     def __init__( self, app ):
         self.app = app
-        self.type = 'setup_purl_environment'
+        self.type = 'setup_perl_environment'
 
     def execute_step( self, tool_dependency, package_name, actions, action_dict, filtered_actions, env_file_builder,
                       install_environment, work_dir, current_dir=None, initial_download=False ):
@@ -1338,7 +1307,7 @@ class SetupREnvironment( Download, RecipeStep ):
         #       <repository name="package_r_3_0_1" owner="bgruening">
         #           <package name="R" version="3.0.1" />
         #       </repository>
-        #       <!-- allow installing an R packages -->
+        #       <!-- allow installing one or more R packages -->
         #       <package sha256sum="7056b06041fd96ebea9c74f445906f1a5cd784b2b1573c02fcaee86a40f3034d">https://github.com/bgruening/download_store/raw/master/DESeq2-1_0_18/BiocGenerics_0.6.0.tar.gz</package>
         # </action>
         dir = None
@@ -1346,10 +1315,14 @@ class SetupREnvironment( Download, RecipeStep ):
             filtered_actions = actions[ 1: ]
         env_shell_file_paths = action_dict.get( 'env_shell_file_paths', None )
         if env_shell_file_paths is None:
-            log.debug( 'Missing R environment. Please check your specified R installation exists.' )
-            if initial_download:
-                return tool_dependency, filtered_actions, dir
-            return tool_dependency, None, None
+            error_message = 'Missing R environment. Please check your specified R installation exists.'
+            log.error( error_message )
+            status = self.app.install_model.ToolDependency.installation_status.ERROR
+            tool_dependency = tool_dependency_util.set_tool_dependency_attributes( self.app,
+                                                                                   tool_dependency,
+                                                                                   status=status,
+                                                                                   error_message=error_message )
+            return tool_dependency, [], None
         else:
             install_environment.add_env_shell_file_paths( env_shell_file_paths )
         log.debug( 'Handling setup_r_environment for tool dependency %s with install_environment.env_shell_file_paths:\n%s' %
@@ -1579,7 +1552,6 @@ class SetupPythonEnvironment( Download, RecipeStep ):
         although it may never be necessary.  If initial_download is True, the recipe steps will be filtered
         and returned and the installation directory (i.e., dir) will be defined and returned.  If we're not
         in the initial download stage, these actions will not occur, and None values will be returned for them.
-
         """
         # <action type="setup_python_environment">
         #       <repository name="package_python_2_7" owner="bgruening">

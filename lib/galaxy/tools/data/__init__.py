@@ -6,21 +6,20 @@ users to configure data tables for a local Galaxy instance without needing
 to modify the tool configurations.
 """
 
+import hashlib
 import logging
 import os
 import os.path
 import re
 import string
-import hashlib
-
 from glob import glob
 from tempfile import NamedTemporaryFile
-from urllib2 import urlopen
+
+from six.moves.urllib.request import urlopen
 
 from galaxy import util
-from galaxy.util.odict import odict
-
 from galaxy.util.dictifiable import Dictifiable
+from galaxy.util.odict import odict
 
 log = logging.getLogger( __name__ )
 
@@ -83,9 +82,9 @@ class ToolDataTableManager( object ):
                 table_elems.append( table_elem )
                 if table.name not in self.data_tables:
                     self.data_tables[ table.name ] = table
-                    log.debug( "Loaded tool data table '%s'", table.name )
+                    log.debug( "Loaded tool data table '%s' from file '%s'", table.name, filename )
                 else:
-                    log.debug( "Loading another instance of data table '%s', attempting to merge content.", table.name )
+                    log.debug( "Loading another instance of data table '%s' from file '%s', attempting to merge content.", table.name, filename )
                     self.data_tables[ table.name ].merge_tool_data_table( table, allow_duplicates=False )  # only merge content, do not persist to disk, do not allow duplicate rows when merging
                     # FIXME: This does not account for an entry with the same unique build ID, but a different path.
         return table_elems
@@ -117,7 +116,7 @@ class ToolDataTableManager( object ):
             table_elems = self.load_from_config_file( config_filename=config_filename,
                                                       tool_data_path=tool_data_path,
                                                       from_shed_config=True )
-        except Exception, e:
+        except Exception as e:
             error_message = 'Error attempting to parse file %s: %s' % ( str( os.path.split( config_filename )[ 1 ] ), str( e ) )
             log.debug( error_message )
             table_elems = []
@@ -144,7 +143,7 @@ class ToolDataTableManager( object ):
             tree = util.parse_xml( full_path )
             root = tree.getroot()
             out_elems = [ elem for elem in root ]
-        except Exception, e:
+        except Exception as e:
             out_elems = []
             log.debug( 'Could not parse existing tool data table config, assume no existing elements: %s', e )
         for elem in remove_elems:
@@ -158,18 +157,32 @@ class ToolDataTableManager( object ):
             for elem in out_elems:
                 out.write( util.xml_to_string( elem, pretty=True ) )
             out.write( '</tables>\n' )
-        os.chmod( full_path, 0644 )
+        os.chmod( full_path, 0o644 )
 
-    def reload_tables( self, table_names=None ):
+    def reload_tables( self, table_names=None, path=None ):
+        """
+        Reload tool data tables. If neither table_names nor path is given, reloads all tool data tables.
+        """
         tables = self.get_tables()
         if not table_names:
-            table_names = tables.keys()
+            if path:
+                table_names = self.get_table_names_by_path(path)
+            else:
+                table_names = list(tables.keys())
         elif not isinstance( table_names, list ):
             table_names = [ table_names ]
         for table_name in table_names:
             tables[ table_name ].reload_from_files()
             log.debug( "Reloaded tool data table '%s' from files.", table_name )
         return table_names
+
+    def get_table_names_by_path(self, path):
+        """Returns a list of table names given a path"""
+        table_names = set()
+        for name, data_table in self.data_tables.items():
+            if path in data_table.filenames:
+                table_names.add(name)
+        return list(table_names)
 
 
 class ToolDataTable( object ):
@@ -291,7 +304,7 @@ class TabularToolDataTable( ToolDataTable, Dictifiable ):
                     tmp_file = NamedTemporaryFile( prefix='TTDT_URL_%s-' % self.name )
                     try:
                         tmp_file.write( urlopen( filename, timeout=url_timeout ).read() )
-                    except Exception, e:
+                    except Exception as e:
                         log.error( 'Error loading Data Table URL "%s": %s', filename, e )
                         continue
                     log.debug( 'Loading Data Table URL "%s" as filename "%s".', filename, tmp_file.name )
@@ -318,6 +331,10 @@ class TabularToolDataTable( ToolDataTable, Dictifiable ):
                 filename = os.path.join( tool_data_path, filename )
             if os.path.exists( filename ):
                 found = True
+            elif os.path.exists( "%s.sample" % filename ) and not from_shed_config:
+                log.info("Could not find tool data %s, reading sample" % filename)
+                filename = "%s.sample" % filename
+                found = True
             else:
                 # Since the path attribute can include a hard-coded path to a specific directory
                 # (e.g., <file path="tool-data/cg_crr_files.loc" />) which may not be the same value
@@ -336,13 +353,13 @@ class TabularToolDataTable( ToolDataTable, Dictifiable ):
                 self._update_version()
             else:
                 self.missing_index_file = filename
-                log.warn( "Cannot find index file '%s' for tool data table '%s'" % ( filename, self.name ) )
+                log.warning( "Cannot find index file '%s' for tool data table '%s'" % ( filename, self.name ) )
 
             if filename not in self.filenames or not self.filenames[ filename ][ 'found' ]:
                 self.filenames[ filename ] = dict( found=found, filename=filename, from_shed_config=from_shed_config, tool_data_path=tool_data_path,
                                                    config_element=config_element, tool_shed_repository=repo_info, errors=errors )
             else:
-                log.debug( "Filename '%s' already exists in filenames (%s), not adding", filename, self.filenames.keys() )
+                log.debug( "Filename '%s' already exists in filenames (%s), not adding", filename, list(self.filenames.keys()) )
             # Remove URL tmp file
             if tmp_file is not None:
                 tmp_file.close()
@@ -350,7 +367,7 @@ class TabularToolDataTable( ToolDataTable, Dictifiable ):
     def merge_tool_data_table( self, other_table, allow_duplicates=True, persist=False, persist_on_error=False, entry_source=None, **kwd ):
         assert self.columns == other_table.columns, "Merging tabular data tables with non matching columns is not allowed: %s:%s != %s:%s" % ( self.name, self.columns, other_table.name, other_table.columns )
         # merge filename info
-        for filename, info in other_table.filenames.iteritems():
+        for filename, info in other_table.filenames.items():
             if filename not in self.filenames:
                 self.filenames[ filename ] = info
         # save info about table
@@ -441,7 +458,7 @@ class TabularToolDataTable( ToolDataTable, Dictifiable ):
 
         TODO: Allow named access to fields using the column names.
         """
-        separator_char = (lambda c: '<TAB>' if c == '\t' else c)(self.separator)
+        separator_char = "<TAB>" if self.separator == "\t" else self.separator
 
         rval = []
         for i, line in enumerate( reader ):
@@ -457,14 +474,16 @@ class TabularToolDataTable( ToolDataTable, Dictifiable ):
                     line_error = "Line %i in tool data table '%s' is invalid (HINT: '%s' characters must be used to separate fields):\n%s" % ( ( i + 1 ), self.name, separator_char, line )
                     if errors is not None:
                         errors.append( line_error )
-                    log.warn( line_error )
+                    log.warning( line_error )
+        if hasattr(reader, "name"):
+            log.debug("Loaded %i lines from '%s' for '%s'", len(rval), reader.name, self.name)
         return rval
 
     def get_column_name_list( self ):
         rval = []
         for i in range( self.largest_index + 1 ):
             found_column = False
-            for name, index in self.columns.iteritems():
+            for name, index in self.columns.items():
                 if index == i:
                     if not found_column:
                         rval.append( name )
@@ -521,7 +540,7 @@ class TabularToolDataTable( ToolDataTable, Dictifiable ):
         else:
             source_repo_info = None
         filename = default
-        for name, value in self.filenames.iteritems():
+        for name, value in self.filenames.items():
             repo_info = value.get( 'tool_shed_repository', None )
             if ( not source_repo_info and not repo_info ) or ( source_repo_info and repo_info and source_repo_info == repo_info ):
                 filename = name
@@ -565,7 +584,7 @@ class TabularToolDataTable( ToolDataTable, Dictifiable ):
                 log.debug( "Persisting changes to file: %s", filename )
                 try:
                     data_table_fh = open( filename, 'r+b' )
-                except IOError, e:
+                except IOError as e:
                     log.warning( 'Error opening data table file (%s) with r+b, assuming file does not exist and will open as wb: %s', filename, e )
                     data_table_fh = open( filename, 'wb' )
                 if os.stat( filename )[6] != 0:
@@ -586,7 +605,7 @@ class TabularToolDataTable( ToolDataTable, Dictifiable ):
                 values = self._replace_field_separators( values )
                 self.filter_file_fields( filename, values )
             else:
-                log.warn( "Cannot find index file '%s' for tool data table '%s'" % ( filename, self.name ) )
+                log.warning( "Cannot find index file '%s' for tool data table '%s'" % ( filename, self.name ) )
 
         self.reload_from_files()
 
@@ -628,7 +647,7 @@ class TabularToolDataTable( ToolDataTable, Dictifiable ):
                     replace = "_"
                 else:
                     replace = " "
-        return map( lambda x: x.replace( separator, replace ), fields )
+        return [x.replace( separator, replace ) for x in fields]
 
     def _deduplicate_data( self ):
         # Remove duplicate entries, without recreating self.data object

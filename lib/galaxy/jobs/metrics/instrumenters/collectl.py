@@ -1,16 +1,18 @@
+"""The module describes the ``collectl`` job metrics plugin."""
+import logging
 import os
 import shutil
 
+from galaxy import util
+
+from ..collectl import (
+    cli,
+    processes,
+    subsystems
+)
 from ..instrumenters import InstrumentPlugin
 from ...metrics import formatting
-from ..collectl import subsystems
-from ..collectl import cli
-from ..collectl import processes
 
-from galaxy import util
-from galaxy.util import directory_hash
-
-import logging
 log = logging.getLogger( __name__ )
 
 # By default, only grab statistics for user processes (as identified by
@@ -109,7 +111,7 @@ class CollectlPlugin( InstrumentPlugin ):
         )
 
         if self.saved_logs_path:
-            destination_rel_dir = os.path.join( *directory_hash.directory_hash_id( job_id ) )
+            destination_rel_dir = os.path.join( *util.directory_hash_id( job_id ) )
             destination_rel_path = os.path.join( destination_rel_dir, rel_path )
             destination_path = os.path.join( self.saved_logs_path, destination_rel_path )
             destination_dir = os.path.dirname( destination_path )
@@ -139,7 +141,7 @@ class CollectlPlugin( InstrumentPlugin ):
     def __configure_subsystems( self, kwargs ):
         raw_subsystems_str = kwargs.get( "subsystems", DEFAULT_SUBSYSTEMS )
         raw_subsystems = util.listify( raw_subsystems_str, do_strip=True )
-        self.subsystems = map( subsystems.get_subsystem, raw_subsystems )
+        self.subsystems = [ subsystems.get_subsystem(_) for _ in raw_subsystems ]
 
     def __configure_collectl_recorder_args( self, kwargs ):
         collectl_recorder_args = kwargs.copy()
@@ -214,4 +216,4 @@ def procfilt_argument( procfilt_on ):
         return ""
 
 
-__all__ = [ 'CollectlPlugin' ]
+__all__ = ( 'CollectlPlugin', )

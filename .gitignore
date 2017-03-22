@@ -14,11 +14,13 @@ database/citations
 database/community_files
 database/compiled_templates
 database/files
+database/jobs_directory
 database/job_working_directory
 database/pbs
 database/tmp
 database/*.sqlite
 database/openid_consumer_cache
+database/dependencies
 
 # Python bytecode
 *.pyc
@@ -39,6 +41,9 @@ lib/tool_shed/scripts/bootstrap_tool_shed/user_info.xml
 reports_webapp.lock
 reports_webapp.log
 reports_webapp.pid
+
+# Jupyter Runtime Files
+.ipynb_checkpoints
 
 # Config files
 universe_wsgi.ini
@@ -64,6 +69,8 @@ object_store_conf.xml
 job_metrics_conf.xml
 workflow_schedulers_conf.xml
 config/*
+config/plugins/interactive_environments/**/*.ini
+!config/plugins
 static/welcome.html.*
 static/welcome.html
 
@@ -120,9 +127,12 @@ bower_components
 
 # Documentation build files.
 doc/build
+doc/schema.md
+doc/source/dev/schema.rst
 
 # Misc
 *.orig
 .DS_Store
 *.rej
 *~
+.idea/

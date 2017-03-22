@@ -1,7 +1,8 @@
 """
 This script adds a foreign key to the form_values table in the galaxy_user table
 """
-import datetime
+from __future__ import print_function
+
 import logging
 import sys
 
@@ -9,7 +10,6 @@ from migrate import ForeignKeyConstraint
 from sqlalchemy import Column, Integer, MetaData, Table
 from sqlalchemy.exc import NoSuchTableError
 
-now = datetime.datetime.utcnow
 log = logging.getLogger( __name__ )
 log.setLevel(logging.DEBUG)
 handler = logging.StreamHandler( sys.stdout )
@@ -21,15 +21,9 @@ log.addHandler( handler )
 metadata = MetaData()
 
 
-def display_migration_details():
-    print "========================================"
-    print "This script adds a foreign key to the form_values table in the galaxy_user table"
-    print "========================================"
-
-
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    display_migration_details()
+    print(__doc__)
     # Load existing tables
     metadata.reflect()
     try:
@@ -42,8 +36,8 @@ def upgrade(migrate_engine):
             col = Column( "form_values_id", Integer, index=True )
             col.create( User_table, index_name='ix_user_form_values_id')
             assert col is User_table.c.form_values_id
-        except Exception, e:
-            log.debug( "Adding column 'form_values_id' to galaxy_user table failed: %s" % ( str( e ) ) )
+        except Exception:
+            log.exception("Adding column 'form_values_id' to galaxy_user table failed.")
         try:
             FormValues_table = Table( "form_values", metadata, autoload=True )
         except NoSuchTableError:
@@ -58,8 +52,8 @@ def upgrade(migrate_engine):
                                                  name='user_form_values_id_fk' )
                     # Create the constraint
                     cons.create()
-                except Exception, e:
-                    log.debug( "Adding foreign key constraint 'user_form_values_id_fk' to table 'galaxy_user' failed: %s" % ( str( e ) ) )
+                except Exception:
+                    log.exception("Adding foreign key constraint 'user_form_values_id_fk' to table 'galaxy_user' failed.")
 
 
 def downgrade(migrate_engine):

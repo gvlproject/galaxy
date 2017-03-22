@@ -16,7 +16,7 @@ def check_nib_file( dbkey, GALAXY_DATA_INDEX_DIR ):
     nib_file = "%s/alignseq.loc" % GALAXY_DATA_INDEX_DIR
     nib_path = ''
     nibs = {}
-    for i, line in enumerate( file( nib_file ) ):
+    for i, line in enumerate( open( nib_file ) ):
         line = line.rstrip( '\r\n' )
         if line and not line.startswith( "#" ):
             fields = line.split( '\t' )
@@ -33,7 +33,7 @@ def check_twobit_file( dbkey, GALAXY_DATA_INDEX_DIR ):
     twobit_file = "%s/twobit.loc" % GALAXY_DATA_INDEX_DIR
     twobit_path = ''
     twobits = {}
-    for i, line in enumerate( file( twobit_file ) ):
+    for i, line in enumerate( open( twobit_file ) ):
         line = line.rstrip( '\r\n' )
         if line and not line.startswith( "#" ):
             fields = line.split( '\t' )
@@ -106,6 +106,7 @@ def __main__():
         os.system( command )
         os.system( 'cat %s >> %s' % ( output_tempfile, output_file ) )
         os.remove( output_tempfile )
+
 
 if __name__ == '__main__':
     __main__()

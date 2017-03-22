@@ -1,4 +1,5 @@
 import logging
+
 from galaxy import web
 from galaxy.model import ExternalService, Sample
 from galaxy.web.base.controller import BaseUIController
@@ -24,4 +25,4 @@ class ExternalServiceController( BaseUIController ):
             results = populated_action.handle_results( trans )
             return results
         else:
-            raise 'unknown item class type'
+            raise Exception( 'unknown item class type' )

@@ -1,17 +1,15 @@
 import logging
 import math
+from json import dumps, loads
 
 from markupsafe import escape
-from six import text_type
-from six import string_types
-from sqlalchemy.sql.expression import and_, func, or_, null, false, true
+from six import string_types, text_type
+from sqlalchemy.sql.expression import and_, false, func, null, or_, true
 
 from galaxy.model.item_attrs import RuntimeException, UsesAnnotations, UsesItemRatings
-from galaxy.util import sanitize_text
-from galaxy.util.json import loads, dumps
+from galaxy.util import sanitize_text, unicodify
 from galaxy.util.odict import odict
-from galaxy.web.framework import decorators
-from galaxy.web.framework import url_for
+from galaxy.web.framework import decorators, url_for
 from galaxy.web.framework.helpers import iff
 
 
@@ -348,7 +346,7 @@ class GridColumn( object ):
     def __init__( self, label, key=None, model_class=None, method=None, format=None,
                   link=None, attach_popup=False, visible=True, nowrap=False,
                   # Valid values for filterable are ['standard', 'advanced', None]
-                  filterable=None, sortable=True, label_id_prefix=None, inbound=False ):
+                  filterable=None, sortable=True, label_id_prefix=None, target=None ):
         """Create a grid column."""
         self.label = label
         self.key = key
@@ -356,7 +354,7 @@ class GridColumn( object ):
         self.method = method
         self.format = format
         self.link = link
-        self.inbound = inbound
+        self.target = target
         self.nowrap = nowrap
         self.attach_popup = attach_popup
         self.visible = visible
@@ -374,7 +372,7 @@ class GridColumn( object ):
             value = None
         if self.format:
             value = self.format( value )
-        return escape(value)
+        return escape(unicodify(value))
 
     def get_link( self, trans, grid, item ):
         if self.link and self.link( item ):
@@ -567,7 +565,7 @@ class OwnerAnnotationColumn( TextColumn, UsesAnnotations ):
                 ann_snippet += "..."
         else:
             ann_snippet = ""
-        return ann_snippet
+        return escape( ann_snippet )
 
     def get_single_filter( self, user, a_filter ):
         """ Filter by annotation and annotation owner. """
@@ -605,7 +603,7 @@ class CommunityTagsColumn( TextColumn ):
                 column_filter = ",".join( column_filter )
             raw_tags = trans.app.tag_handler.parse_tags( column_filter.encode( "utf-8" ) )
             clause_list = []
-            for name, value in raw_tags.items():
+            for name, value in raw_tags:
                 if name:
                     # Filter by all tags.
                     clause_list.append( self.model_class.tags.any( func.lower( self.model_tag_association_class.user_tname ).like( "%" + name.lower() + "%" ) ) )
@@ -635,7 +633,7 @@ class IndividualTagsColumn( CommunityTagsColumn ):
                 column_filter = ",".join( column_filter )
             raw_tags = trans.app.tag_handler.parse_tags( column_filter.encode( "utf-8" ) )
             clause_list = []
-            for name, value in raw_tags.items():
+            for name, value in raw_tags:
                 if name:
                     # Filter by individual's tag names.
                     clause_list.append( self.model_class.tags.any( and_( func.lower( self.model_tag_association_class.user_tname ).like( "%" + name.lower() + "%" ), self.model_tag_association_class.user == user ) ) )
@@ -801,7 +799,7 @@ class SharingStatusColumn( GridColumn ):
 class GridOperation( object ):
     def __init__( self, label, key=None, condition=None, allow_multiple=True, allow_popup=True,
                   target=None, url_args=None, async_compatible=False, confirm=None,
-                  global_operation=None, inbound=False ):
+                  global_operation=None ):
         self.label = label
         self.key = key
         self.allow_multiple = allow_multiple
@@ -810,7 +808,6 @@ class GridOperation( object ):
         self.target = target
         self.url_args = url_args
         self.async_compatible = async_compatible
-        self.inbound = inbound
         # if 'confirm' is set, then ask before completing the operation
         self.confirm = confirm
         # specify a general operation that acts on the full grid
@@ -844,10 +841,10 @@ class DisplayByUsernameAndSlugGridOperation( GridOperation ):
 
 
 class GridAction( object ):
-    def __init__( self, label=None, url_args=None, inbound=False ):
+    def __init__( self, label=None, url_args=None, target=None ):
         self.label = label
         self.url_args = url_args
-        self.inbound = inbound
+        self.target = target
 
 
 class GridColumnFilter( object ):

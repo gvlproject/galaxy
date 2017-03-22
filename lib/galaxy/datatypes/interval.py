@@ -6,10 +6,10 @@ import math
 import os
 import sys
 import tempfile
-import urllib
 
 import numpy
 from bx.intervals.io import GenomicIntervalReader, ParseError
+from six.moves.urllib.parse import quote_plus
 
 from galaxy import util
 from galaxy.datatypes import metadata
@@ -19,17 +19,19 @@ from galaxy.datatypes.tabular import Tabular
 from galaxy.datatypes.util.gff_util import parse_gff_attributes
 from galaxy.web import url_for
 
-import data
-import dataproviders
+from . import (
+    data,
+    dataproviders
+)
 
 log = logging.getLogger(__name__)
 
 # Contains the meta columns and the words that map to it; list aliases on the
 # right side of the : in decreasing order of priority
 alias_spec = {
-    'chromCol'  : [ 'chrom' , 'CHROMOSOME' , 'CHROM', 'Chromosome Name' ],
-    'startCol'  : [ 'start' , 'START', 'chromStart', 'txStart', 'Start Position (bp)' ],
-    'endCol'    : [ 'end'   , 'END'  , 'STOP', 'chromEnd', 'txEnd', 'End Position (bp)'  ],
+    'chromCol'  : [ 'chrom', 'CHROMOSOME', 'CHROM', 'Chromosome Name' ],
+    'startCol'  : [ 'start', 'START', 'chromStart', 'txStart', 'Start Position (bp)' ],
+    'endCol'    : [ 'end', 'END', 'STOP', 'chromEnd', 'txEnd', 'End Position (bp)' ],
     'strandCol' : [ 'strand', 'STRAND', 'Strand' ],
     'nameCol'   : [ 'name', 'NAME', 'Name', 'name2', 'NAME2', 'Name2', 'Ensembl Gene ID', 'Ensembl Transcript ID', 'Ensembl Peptide ID' ]
 }
@@ -50,6 +52,7 @@ VIEWPORT_MAX_READS_PER_LINE = 10
 @dataproviders.decorators.has_dataproviders
 class Interval( Tabular ):
     """Tab delimited data containing interval information"""
+    edam_data = "data_3002"
     edam_format = "format_3475"
     file_ext = "interval"
     line_class = "region"
@@ -78,14 +81,14 @@ class Interval( Tabular ):
         if dataset.has_data():
             empty_line_count = 0
             num_check_lines = 100  # only check up to this many non empty lines
-            for i, line in enumerate( file( dataset.file_name ) ):
+            for i, line in enumerate( open( dataset.file_name ) ):
                 line = line.rstrip( '\r\n' )
                 if line:
                     if ( first_line_is_header or line[0] == '#' ):
                         self.init_meta( dataset )
                         line = line.strip( '#' )
                         elems = line.split( '\t' )
-                        for meta_name, header_list in alias_spec.iteritems():
+                        for meta_name, header_list in alias_spec.items():
                             for header_val in header_list:
                                 if header_val in elems:
                                     # found highest priority header to meta_name
@@ -238,7 +241,7 @@ class Interval( Tabular ):
 
     def display_peek( self, dataset ):
         """Returns formated html of peek"""
-        return Tabular.make_html_table( self, dataset, column_parameter_alias={'chromCol': 'Chrom', 'startCol': 'Start', 'endCol': 'End', 'strandCol': 'Strand', 'nameCol': 'Name'} )
+        return self.make_html_table( dataset, column_parameter_alias={'chromCol': 'Chrom', 'startCol': 'Start', 'endCol': 'End', 'strandCol': 'Strand', 'nameCol': 'Name'} )
 
     def ucsc_links( self, dataset, type, app, base_url ):
         """
@@ -262,10 +265,10 @@ class Interval( Tabular ):
         for site_name, site_url in valid_sites:
             internal_url = url_for( controller='dataset', dataset_id=dataset.id,
                                     action='display_at', filename='ucsc_' + site_name )
-            display_url = urllib.quote_plus( "%s%s/display_as?id=%i&display_app=%s&authz_method=display_at"
-                                             % (base_url, url_for( controller='root' ), dataset.id, type) )
-            redirect_url = urllib.quote_plus( "%sdb=%s&position=%s:%s-%s&hgt.customText=%%s"
-                                              % (site_url, dataset.dbkey, chrom, start, stop ) )
+            display_url = quote_plus( "%s%s/display_as?id=%i&display_app=%s&authz_method=display_at" %
+                                      (base_url, url_for( controller='root' ), dataset.id, type) )
+            redirect_url = quote_plus( "%sdb=%s&position=%s:%s-%s&hgt.customText=%%s" %
+                                       (site_url, dataset.dbkey, chrom, start, stop ) )
             link = '%s?redirect_url=%s&display_url=%s' % ( internal_url, redirect_url, display_url )
             ret_val.append( ( site_name, link ) )
         return ret_val
@@ -285,7 +288,7 @@ class Interval( Tabular ):
 
         while True:
             try:
-                reader.next()
+                next(reader)
             except ParseError as e:
                 errors.append(e)
             except StopIteration:
@@ -375,7 +378,7 @@ class Interval( Tabular ):
 
 class BedGraph( Interval ):
     """Tab delimited chrom/start/end/datavalue dataset"""
-
+    edam_format = "format_3583"
     file_ext = "bedgraph"
     track_type = "LineTrack"
     data_sources = { "data": "bigwig", "index": "bigwig" }
@@ -401,6 +404,8 @@ class Bed( Interval ):
     data_sources = { "data": "tabix", "index": "bigwig", "feature_search": "fli" }
     track_type = Interval.track_type
 
+    column_names = [ 'Chrom', 'Start', 'End', 'Name', 'Score', 'Strand', 'ThickStart', 'ThickEnd', 'ItemRGB', 'BlockCount', 'BlockSizes', 'BlockStarts' ]
+
     """Add metadata elements"""
     MetadataElement( name="chromCol", default=1, desc="Chrom column", param=metadata.ColumnParameter )
     MetadataElement( name="startCol", default=2, desc="Start column", param=metadata.ColumnParameter )
@@ -414,7 +419,7 @@ class Bed( Interval ):
         """Sets the metadata information for datasets previously determined to be in bed format."""
         i = 0
         if dataset.has_data():
-            for i, line in enumerate( file(dataset.file_name) ):
+            for i, line in enumerate( open(dataset.file_name) ):
                 metadata_set = False
                 line = line.rstrip('\r\n')
                 if line and not line.startswith('#'):
@@ -582,7 +587,7 @@ class Bed( Interval ):
 
 class BedStrict( Bed ):
     """Tab delimited data in strict BED format - no non-standard columns allowed"""
-
+    edam_format = "format_3584"
     file_ext = "bedstrict"
 
     # no user change of datatype allowed
@@ -613,13 +618,13 @@ class BedStrict( Bed ):
 
 class Bed6( BedStrict ):
     """Tab delimited data in strict BED format - no non-standard columns allowed; column count forced to 6"""
-
+    edam_format = "format_3585"
     file_ext = "bed6"
 
 
 class Bed12( BedStrict ):
     """Tab delimited data in strict BED format - no non-standard columns allowed; column count forced to 12"""
-
+    edam_format = "format_3586"
     file_ext = "bed12"
 
 
@@ -632,8 +637,8 @@ class _RemoteCallMixin:
         """
         internal_url = "%s" % url_for( controller='dataset', dataset_id=dataset.id, action='display_at', filename='%s_%s' % ( type, site_name ) )
         base_url = app.config.get( "display_at_callback", base_url )
-        display_url = urllib.quote_plus( "%s%s/display_as?id=%i&display_app=%s&authz_method=display_at" %
-                                         ( base_url, url_for( controller='root' ), dataset.id, type ) )
+        display_url = quote_plus( "%s%s/display_as?id=%i&display_app=%s&authz_method=display_at" %
+                                  ( base_url, url_for( controller='root' ), dataset.id, type ) )
         link = '%s?redirect_url=%s&display_url=%s' % ( internal_url, redirect_url, display_url )
         return link
 
@@ -641,6 +646,7 @@ class _RemoteCallMixin:
 @dataproviders.decorators.has_dataproviders
 class Gff( Tabular, _RemoteCallMixin ):
     """Tab delimited data in Gff format"""
+    edam_data = "data_1255"
     edam_format = "format_2305"
     file_ext = "gff"
     column_names = [ 'Seqname', 'Source', 'Feature', 'Start', 'End', 'Score', 'Strand', 'Frame', 'Group' ]
@@ -670,7 +676,7 @@ class Gff( Tabular, _RemoteCallMixin ):
         # not found in the first N lines will not have metadata.
         num_lines = 200
         attribute_types = {}
-        for i, line in enumerate( file( dataset.file_name ) ):
+        for i, line in enumerate( open( dataset.file_name ) ):
             if line and not line.startswith( '#' ):
                 elems = line.split( '\t' )
                 if len( elems ) == 9:
@@ -704,7 +710,7 @@ class Gff( Tabular, _RemoteCallMixin ):
         self.set_attribute_metadata( dataset )
 
         i = 0
-        for i, line in enumerate( file( dataset.file_name ) ):
+        for i, line in enumerate( open( dataset.file_name ) ):
             line = line.rstrip('\r\n')
             if line and not line.startswith( '#' ):
                 elems = line.split( '\t' )
@@ -719,7 +725,7 @@ class Gff( Tabular, _RemoteCallMixin ):
 
     def display_peek( self, dataset ):
         """Returns formated html of peek"""
-        return Tabular.make_html_table( self, dataset, column_names=self.column_names )
+        return self.make_html_table( dataset, column_names=self.column_names )
 
     def get_estimated_display_viewport( self, dataset ):
         """
@@ -804,7 +810,7 @@ class Gff( Tabular, _RemoteCallMixin ):
         if seqid is not None:
             for site_name, site_url in app.datatypes_registry.get_legacy_sites_by_build('ucsc', dataset.dbkey ):
                 if site_name in app.datatypes_registry.get_display_sites('ucsc'):
-                    redirect_url = urllib.quote_plus(
+                    redirect_url = quote_plus(
                         "%sdb=%s&position=%s:%s-%s&hgt.customText=%%s" %
                         ( site_url, dataset.dbkey, seqid, start, stop ) )
                     link = self._get_remote_call_url( redirect_url, site_name, dataset, type, app, base_url )
@@ -819,7 +825,7 @@ class Gff( Tabular, _RemoteCallMixin ):
                 if site_name in app.datatypes_registry.get_display_sites('gbrowse'):
                     if seqid.startswith( 'chr' ) and len( seqid ) > 3:
                         seqid = seqid[3:]
-                    redirect_url = urllib.quote_plus( "%s/?q=%s:%s..%s&eurl=%%s" % ( site_url, seqid, start, stop ) )
+                    redirect_url = quote_plus( "%s/?q=%s:%s..%s&eurl=%%s" % ( site_url, seqid, start, stop ) )
                     link = self._get_remote_call_url( redirect_url, site_name, dataset, type, app, base_url )
                     ret_val.append( ( site_name, link ) )
         return ret_val
@@ -912,7 +918,7 @@ class Gff3( Gff ):
         self.set_attribute_metadata( dataset )
 
         i = 0
-        for i, line in enumerate( file( dataset.file_name ) ):
+        for i, line in enumerate( open( dataset.file_name ) ):
             line = line.rstrip('\r\n')
             if line and not line.startswith( '#' ):
                 elems = line.split( '\t' )
@@ -1166,7 +1172,7 @@ class Wiggle( Tabular, _RemoteCallMixin ):
                 if site_name in app.datatypes_registry.get_display_sites('gbrowse'):
                     if chrom.startswith( 'chr' ) and len( chrom ) > 3:
                         chrom = chrom[3:]
-                    redirect_url = urllib.quote_plus( "%s/?q=%s:%s..%s&eurl=%%s" % ( site_url, chrom, start, stop ) )
+                    redirect_url = quote_plus( "%s/?q=%s:%s..%s&eurl=%%s" % ( site_url, chrom, start, stop ) )
                     link = self._get_remote_call_url( redirect_url, site_name, dataset, type, app, base_url )
                     ret_val.append( ( site_name, link ) )
         return ret_val
@@ -1177,19 +1183,19 @@ class Wiggle( Tabular, _RemoteCallMixin ):
         if chrom is not None:
             for site_name, site_url in app.datatypes_registry.get_legacy_sites_by_build('ucsc', dataset.dbkey ):
                 if site_name in app.datatypes_registry.get_display_sites('ucsc'):
-                    redirect_url = urllib.quote_plus( "%sdb=%s&position=%s:%s-%s&hgt.customText=%%s" % ( site_url, dataset.dbkey, chrom, start, stop ) )
+                    redirect_url = quote_plus( "%sdb=%s&position=%s:%s-%s&hgt.customText=%%s" % ( site_url, dataset.dbkey, chrom, start, stop ) )
                     link = self._get_remote_call_url( redirect_url, site_name, dataset, type, app, base_url )
                     ret_val.append( ( site_name, link ) )
         return ret_val
 
     def display_peek( self, dataset ):
         """Returns formated html of peek"""
-        return Tabular.make_html_table( self, dataset, skipchars=['track', '#'] )
+        return self.make_html_table( dataset, skipchars=['track', '#'] )
 
     def set_meta( self, dataset, overwrite=True, **kwd ):
         max_data_lines = None
         i = 0
-        for i, line in enumerate( file( dataset.file_name ) ):
+        for i, line in enumerate( open( dataset.file_name ) ):
             line = line.rstrip('\r\n')
             if line and not line.startswith( '#' ):
                 elems = line.split( '\t' )
@@ -1262,7 +1268,7 @@ class Wiggle( Tabular, _RemoteCallMixin ):
         x = numpy.arange( t_start, t_end ) * resolution
         y = data[ t_start : t_end ]
 
-        return zip(x.tolist(), y.tolist())
+        return list(zip(x.tolist(), y.tolist()))
 
     def get_track_resolution( self, dataset, start, end):
         range = end - start
@@ -1288,6 +1294,7 @@ class Wiggle( Tabular, _RemoteCallMixin ):
 
 class CustomTrack ( Tabular ):
     """UCSC CustomTrack"""
+    edam_format = "format_3588"
     file_ext = "customtrack"
 
     def __init__(self, **kwd):
@@ -1300,7 +1307,7 @@ class CustomTrack ( Tabular ):
 
     def display_peek( self, dataset ):
         """Returns formated html of peek"""
-        return Tabular.make_html_table( self, dataset, skipchars=['track', '#'] )
+        return self.make_html_table( dataset, skipchars=['track', '#'] )
 
     def get_estimated_display_viewport( self, dataset, chrom_col=None, start_col=None, end_col=None ):
         """Return a chrom, start, stop tuple for viewing a file."""
@@ -1367,8 +1374,8 @@ class CustomTrack ( Tabular ):
             for site_name, site_url in app.datatypes_registry.get_legacy_sites_by_build('ucsc', dataset.dbkey):
                 if site_name in app.datatypes_registry.get_display_sites('ucsc'):
                     internal_url = "%s" % url_for( controller='dataset', dataset_id=dataset.id, action='display_at', filename='ucsc_' + site_name )
-                    display_url = urllib.quote_plus( "%s%s/display_as?id=%i&display_app=%s&authz_method=display_at" % (base_url, url_for( controller='root' ), dataset.id, type) )
-                    redirect_url = urllib.quote_plus( "%sdb=%s&position=%s:%s-%s&hgt.customText=%%s" % (site_url, dataset.dbkey, chrom, start, stop ) )
+                    display_url = quote_plus( "%s%s/display_as?id=%i&display_app=%s&authz_method=display_at" % (base_url, url_for( controller='root' ), dataset.id, type) )
+                    redirect_url = quote_plus( "%sdb=%s&position=%s:%s-%s&hgt.customText=%%s" % (site_url, dataset.dbkey, chrom, start, stop ) )
                     link = '%s?redirect_url=%s&display_url=%s' % ( internal_url, redirect_url, display_url )
                     ret_val.append( (site_name, link) )
         return ret_val
@@ -1440,7 +1447,7 @@ class ENCODEPeak( Interval ):
     This format is used to provide called peaks of signal enrichment based on
     pooled, normalized (interpreted) data. It is a BED6+4 format.
     '''
-
+    edam_format = "format_3612"
     file_ext = "encodepeak"
     column_names = [ 'Chrom', 'Start', 'End', 'Name', 'Score', 'Strand', 'SignalValue', 'pValue', 'qValue', 'Peak' ]
     data_sources = { "data": "tabix", "index": "bigwig" }
@@ -1460,11 +1467,9 @@ class ChromatinInteractions( Interval ):
     '''
     Chromatin interactions obtained from 3C/5C/Hi-C experiments.
     '''
-
     file_ext = "chrint"
     track_type = "DiagonalHeatmapTrack"
     data_sources = { "data": "tabix", "index": "bigwig" }
-
     column_names = [ 'Chrom1', 'Start1', 'End1', 'Chrom2', 'Start2', 'End2', 'Value' ]
 
     """Add metadata elements"""
@@ -1516,6 +1521,14 @@ class ScIdx(Tabular):
             fh = open(filename, "r")
             while True:
                 line = fh.readline()
+                if not line:
+                    # EOF
+                    if count > 1:
+                        # The second line is always the labels:
+                        # chrom index forward reverse value
+                        # We need at least the column labels and a data line.
+                        return True
+                    return False
                 line = line.strip()
                 # The first line is always a comment like this:
                 # 2015-11-23 20:18:56.51;input.bam;READ1
@@ -1525,14 +1538,6 @@ class ScIdx(Tabular):
                         continue
                     else:
                         return False
-                if not line:
-                    # EOF
-                    if count > 1:
-                        # The second line is always the labels:
-                        # chrom index forward reverse value
-                        # We need at least the column labels and a data line.
-                        return True
-                    return False
                 # Skip first line.
                 if count > 1:
                     items = line.split('\t')

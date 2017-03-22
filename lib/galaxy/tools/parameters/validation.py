@@ -1,13 +1,15 @@
 """
 Classes related to parameter validation.
 """
-
 import logging
 import re
+
 from six import string_types
 
-from galaxy import model
-from galaxy import util
+from galaxy import (
+    model,
+    util
+)
 
 log = logging.getLogger( __name__ )
 
@@ -58,7 +60,7 @@ class RegexValidator( Validator ):
         self.expression = expression
 
     def validate( self, value, trans=None ):
-        if re.match( self.expression, value ) is None:
+        if re.match( self.expression, value or '' ) is None:
             raise ValueError( self.message )
 
 
@@ -229,6 +231,23 @@ class DatasetOkValidator( Validator ):
             raise ValueError( self.message )
 
 
+class DatasetEmptyValidator( Validator ):
+    """Validator that checks if a dataset has a positive file size."""
+    def __init__( self, message=None ):
+        self.message = message
+
+    @classmethod
+    def from_element( cls, param, elem ):
+        return cls( elem.get( 'message', None ) )
+
+    def validate( self, value, trans=None ):
+        if value:
+            if value.get_size() == 0:
+                if self.message is None:
+                    self.message = "The selected dataset is empty, this tool expects non-empty files."
+                raise ValueError( self.message )
+
+
 class MetadataValidator( Validator ):
     """
     Validator that checks for missing metadata
@@ -329,19 +348,20 @@ class MetadataInFileColumnValidator( Validator ):
         if metadata_name:
             metadata_name = metadata_name.strip()
         metadata_column = int( elem.get( "metadata_column", 0 ) )
+        split = elem.get( "split", "\t" )
         message = elem.get( "message", "Value for metadata %s was not found in %s." % ( metadata_name, filename ) )
         line_startswith = elem.get( "line_startswith", None  )
         if line_startswith:
             line_startswith = line_startswith.strip()
-        return cls( filename, metadata_name, metadata_column, message, line_startswith )
+        return cls( filename, metadata_name, metadata_column, message, line_startswith, split )
 
-    def __init__( self, filename, metadata_name, metadata_column, message="Value for metadata not found.", line_startswith=None ):
+    def __init__( self, filename, metadata_name, metadata_column, message="Value for metadata not found.", line_startswith=None, split="\t" ):
         self.metadata_name = metadata_name
         self.message = message
         self.valid_values = []
         for line in open( filename ):
             if line_startswith is None or line.startswith( line_startswith ):
-                fields = line.split( '\t' )
+                fields = line.split( split )
                 if metadata_column < len( fields ):
                     self.valid_values.append( fields[metadata_column].strip() )
 
@@ -408,6 +428,7 @@ class MetadataInDataTableColumnValidator( Validator ):
                 return
         raise ValueError( self.message )
 
+
 validator_types = dict( expression=ExpressionValidator,
                         regex=RegexValidator,
                         in_range=InRangeValidator,
@@ -416,9 +437,10 @@ validator_types = dict( expression=ExpressionValidator,
                         unspecified_build=UnspecifiedBuildValidator,
                         no_options=NoOptionsValidator,
                         empty_field=EmptyTextfieldValidator,
+                        empty_dataset=DatasetEmptyValidator,
                         dataset_metadata_in_file=MetadataInFileColumnValidator,
                         dataset_metadata_in_data_table=MetadataInDataTableColumnValidator,
-                        dataset_ok_validator=DatasetOkValidator )
+                        dataset_ok_validator=DatasetOkValidator, )
 
 
 def get_suite():

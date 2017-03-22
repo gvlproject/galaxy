@@ -1,18 +1,27 @@
 import errno
 import json
+import logging
 import os
+
 from six import string_types
 
 from galaxy import util
+from galaxy.queue_worker import (
+    reload_data_managers,
+    send_control_task
+)
+from galaxy.tools.data import TabularToolDataTable
+from galaxy.tools.toolbox.watcher import (
+    get_tool_conf_watcher,
+    get_tool_data_dir_watcher
+)
 from galaxy.util.odict import odict
 from galaxy.util.template import fill_template
-from galaxy.tools.data import TabularToolDataTable
-from tool_shed.util import common_util
-import tool_shed.util.shed_util_common as suc
-import galaxy.queue_worker
+from tool_shed.util import (
+    common_util,
+    repository_util
+)
 
-# set up logger
-import logging
 log = logging.getLogger( __name__ )
 
 SUPPORTED_DATA_TABLE_TYPES = ( TabularToolDataTable )
@@ -21,11 +30,12 @@ DEFAULT_VALUE_TRANSLATION_TYPE = 'template'
 
 
 class DataManagers( object ):
-    def __init__( self, app, xml_filename=None ):
+    def __init__( self, app, xml_filename=None, conf_watchers=None ):
         self.app = app
         self.data_managers = odict()
         self.managed_data_tables = odict()
         self.tool_path = None
+        self._reload_count = 0
         self.filename = xml_filename or self.app.config.data_manager_config_file
         for filename in util.listify( self.filename ):
             if not filename:
@@ -33,11 +43,36 @@ class DataManagers( object ):
             self.load_from_xml( filename )
         if self.app.config.shed_data_manager_config_file:
             self.load_from_xml( self.app.config.shed_data_manager_config_file, store_tool_path=False, replace_existing=True )
+        if conf_watchers:
+            self.conf_watchers = conf_watchers
+        else:
+            self.conf_watchers = self.get_conf_watchers()
+
+    def get_conf_watchers(self):
+        """
+        Sets up monitoring of data manager related config files.
+        These are the data_manager_conf.xml and shed_data_manager_conf.xml files
+        as well as any loc file in the tool-data directory.
+        """
+        conf_watchers = []
+        conf_watchers.extend([(get_tool_conf_watcher(lambda: reload_data_managers(self.app)), filename) for filename in util.listify(self.filename) if filename])
+        if self.app.config.shed_data_manager_config_file:
+            conf_watchers.append((get_tool_conf_watcher(lambda: reload_data_managers(self.app)), self.app.config.shed_data_manager_config_file))
+        [watcher.watch_file(filename) for watcher, filename in conf_watchers]
+        tool_data_watcher = get_tool_data_dir_watcher(self.app.tool_data_tables, self.app.config)
+        tool_data_watcher.watch_directory(self.app.config.tool_data_path)
+        if self.app.config.shed_tool_data_path:
+            tool_data_watcher.watch_directory(self.app.config.shed_tool_data_path)
+        conf_watchers.append((tool_data_watcher, self.app.tool_data_tables.tool_data_path))
+        return [watcher for watcher, filename in conf_watchers]
+
+    def shutdown(self):
+        [watcher.shutdown() for watcher in self.conf_watchers]
 
     def load_from_xml( self, xml_filename, store_tool_path=True, replace_existing=False ):
         try:
             tree = util.parse_xml( xml_filename )
-        except Exception, e:
+        except Exception as e:
             log.error( 'There was an error parsing your Data Manager config file "%s": %s' % ( xml_filename, e ) )
             return  # we are not able to load any data managers
         root = tree.getroot()
@@ -57,7 +92,7 @@ class DataManagers( object ):
     def load_manager_from_elem( self, data_manager_elem, tool_path=None, add_manager=True, replace_existing=False ):
         try:
             data_manager = DataManager( self, data_manager_elem, tool_path=tool_path )
-        except Exception, e:
+        except Exception as e:
             log.error( "Error loading data_manager '%s':\n%s" % ( e, util.xml_to_string( data_manager_elem ) ) )
             return None
         if add_manager:
@@ -94,7 +129,7 @@ class DataManagers( object ):
                 # determine if any data_tables are no longer tracked
                 for data_table_name in data_manager.data_tables.keys():
                     remove_data_table_tracking = True
-                    for other_data_manager in self.data_managers.itervalues():
+                    for other_data_manager in self.data_managers.values():
                         if data_table_name in other_data_manager.data_tables:
                             remove_data_table_tracking = False
                             break
@@ -150,18 +185,18 @@ class DataManager( object ):
                                                         owner=repository_owner,
                                                         installed_changeset_revision=installed_changeset_revision )
             tool_shed_repository = \
-                suc.get_installed_repository( self.data_managers.app,
-                                              tool_shed=tool_shed,
-                                              name=repository_name,
-                                              owner=repository_owner,
-                                              installed_changeset_revision=installed_changeset_revision )
+                repository_util.get_installed_repository( self.data_managers.app,
+                                                          tool_shed=tool_shed,
+                                                          name=repository_name,
+                                                          owner=repository_owner,
+                                                          installed_changeset_revision=installed_changeset_revision )
             if tool_shed_repository is None:
                 log.warning( 'Could not determine tool shed repository from database. This should only ever happen when running tests.' )
                 # we'll set tool_path manually here from shed_conf_file
                 tool_shed_repository_id = None
                 try:
                     tool_path = util.parse_xml( elem.get( 'shed_conf_file' ) ).getroot().get( 'tool_path', tool_path )
-                except Exception, e:
+                except Exception as e:
                     log.error( 'Error determining tool_path for Data Manager during testing: %s', e )
             else:
                 tool_shed_repository_id = self.data_managers.app.security.encode_id( tool_shed_repository.id )
@@ -261,21 +296,21 @@ class DataManager( object ):
         data_manager_dicts = {}
         data_manager_dict = {}
         # TODO: fix this merging below
-        for output_name, output_dataset in out_data.iteritems():
+        for output_name, output_dataset in out_data.items():
             try:
                 output_dict = json.loads( open( output_dataset.file_name ).read() )
-            except Exception, e:
+            except Exception as e:
                 log.warning( 'Error reading DataManagerTool json for "%s": %s' % ( output_name, e ) )
                 continue
             data_manager_dicts[ output_name ] = output_dict
-            for key, value in output_dict.iteritems():
+            for key, value in output_dict.items():
                 if key not in data_manager_dict:
                     data_manager_dict[ key ] = {}
                 data_manager_dict[ key ].update( value )
             data_manager_dict.update( output_dict )
 
         data_tables_dict = data_manager_dict.get( 'data_tables', {} )
-        for data_table_name in self.data_tables.iterkeys():
+        for data_table_name in self.data_tables.keys():
             data_table_values = data_tables_dict.pop( data_table_name, None )
             if not data_table_values:
                 log.warning( 'No values for data table "%s" were returned by the data manager "%s".' % ( data_table_name, self.id ) )
@@ -289,7 +324,7 @@ class DataManager( object ):
                 continue  # next table name
             output_ref_values = {}
             if data_table_name in self.output_ref_by_data_table:
-                for data_table_column, output_ref in self.output_ref_by_data_table[ data_table_name ].iteritems():
+                for data_table_column, output_ref in self.output_ref_by_data_table[ data_table_name ].items():
                     output_ref_dataset = out_data.get( output_ref, None )
                     assert output_ref_dataset is not None, "Referenced output was not found."
                     output_ref_values[ data_table_column ] = output_ref_dataset
@@ -298,14 +333,15 @@ class DataManager( object ):
                 data_table_values = [ data_table_values ]
             for data_table_row in data_table_values:
                 data_table_value = dict( **data_table_row )  # keep original values here
-                for name, value in data_table_row.iteritems():  # FIXME: need to loop through here based upon order listed in data_manager config
+                for name, value in data_table_row.items():  # FIXME: need to loop through here based upon order listed in data_manager config
                     if name in output_ref_values:
                         self.process_move( data_table_name, name, output_ref_values[ name ].extra_files_path, **data_table_value )
                         data_table_value[ name ] = self.process_value_translation( data_table_name, name, **data_table_value )
                 data_table.add_entry( data_table_value, persist=True, entry_source=self )
-                galaxy.queue_worker.send_control_task(self.data_managers.app, 'reload_tool_data_tables',
-                                                      noop_self=True,
-                                                      kwargs={'table_name': data_table_name} )
+                send_control_task(self.data_managers.app,
+                                  'reload_tool_data_tables',
+                                  noop_self=True,
+                                  kwargs={'table_name': data_table_name} )
         if self.undeclared_tables and data_tables_dict:
             # We handle the data move, by just moving all the data out of the extra files path
             # moving a directory and the target already exists, we move the contents instead
@@ -313,21 +349,21 @@ class DataManager( object ):
             for ref_file in out_data.values():
                 util.move_merge( ref_file.extra_files_path, self.data_managers.app.config.galaxy_data_manager_data_path )
             path_column_names = [ 'path' ]
-            for data_table_name, data_table_values in data_tables_dict.iteritems():
+            for data_table_name, data_table_values in data_tables_dict.items():
                 data_table = self.data_managers.app.tool_data_tables.get( data_table_name, None )
                 if not isinstance( data_table_values, list ):
                     data_table_values = [ data_table_values ]
                 for data_table_row in data_table_values:
                     data_table_value = dict( **data_table_row )  # keep original values here
-                    for name, value in data_table_row.iteritems():
+                    for name, value in data_table_row.items():
                         if name in path_column_names:
                             data_table_value[ name ] = os.path.abspath( os.path.join( self.data_managers.app.config.galaxy_data_manager_data_path, value ) )
                     data_table.add_entry( data_table_value, persist=True, entry_source=self )
-                    galaxy.queue_worker.send_control_task(self.data_managers.app, 'reload_tool_data_tables',
-                                                          noop_self=True,
-                                                          kwargs={'table_name': data_table_name} )
+                    send_control_task(self.data_managers.app, 'reload_tool_data_tables',
+                                      noop_self=True,
+                                      kwargs={'table_name': data_table_name} )
         else:
-            for data_table_name, data_table_values in data_tables_dict.iteritems():
+            for data_table_name, data_table_values in data_tables_dict.items():
                 # tool returned extra data table entries, but data table was not declared in data manager
                 # do not add these values, but do provide messages
                 log.warning( 'The data manager "%s" returned an undeclared data table "%s" with new entries "%s". These entries will not be created. Please confirm that an entry for "%s" exists in your "%s" file.' % ( self.id, data_table_name, data_table_values, data_table_name, self.data_managers.filename ) )
@@ -354,7 +390,7 @@ class DataManager( object ):
                 dirs = os.path.split( target )[0]
                 try:
                     os.makedirs( dirs )
-                except OSError, e:
+                except OSError as e:
                     if e.errno != errno.EEXIST:
                         raise e
             # moving a directory and the target already exists, we move the contents instead

@@ -34,7 +34,7 @@ def build_tool_panel_section_select_field( app ):
     options = []
     for section_id, section_name in app.toolbox.get_sections():
         options.append( ( section_name, section_id ) )
-    select_field = SelectField( name='tool_panel_section_id', display='radio' )
+    select_field = SelectField( name='tool_panel_section_id', field_id='tool_panel_section_select' )
     for option_tup in options:
         select_field.add_option( option_tup[ 0 ], option_tup[ 1 ] )
     return select_field
@@ -57,7 +57,7 @@ def copy_sample_file( app, filename, dest_path=None ):
         shutil.copy( full_source_path, full_destination_path )
     # Only create the .loc file if it does not yet exist.  We don't overwrite it in case it
     # contains stuff proprietary to the local instance.
-    if not os.path.exists( os.path.join( dest_path, copied_file ) ):
+    if not os.path.lexists( os.path.join( dest_path, copied_file ) ):
         shutil.copy( full_source_path, os.path.join( dest_path, copied_file ) )
 
 
@@ -129,7 +129,7 @@ def generate_message_for_invalid_tools( app, invalid_file_tups, repository, meta
 def get_headers( fname, sep, count=60, is_multi_byte=False ):
     """Returns a list with the first 'count' lines split by 'sep'."""
     headers = []
-    for idx, line in enumerate( file( fname ) ):
+    for idx, line in enumerate( open( fname ) ):
         line = line.rstrip( '\n\r' )
         if is_multi_byte:
             line = unicodify( line, 'utf-8' )
@@ -241,12 +241,12 @@ def new_state( trans, tool, invalid=False ):
     try:
         # Attempt to generate the tool state using the standard Galaxy-side code
         return tool.new_state( trans )
-    except Exception, e:
+    except Exception as e:
         # Fall back to building tool state as below
         log.debug( 'Failed to build tool state for tool "%s" using standard method, will try to fall back on custom method: %s', tool.id, e )
     inputs = tool.inputs_by_page[ 0 ]
     context = ExpressionContext( state.inputs, parent=None )
-    for input in inputs.itervalues():
+    for input in inputs.values():
         try:
             state.inputs[ input.name ] = input.get_initial_value( trans, context )
         except:

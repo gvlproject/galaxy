@@ -1,14 +1,15 @@
+from json import loads
+
 from markupsafe import escape
 from sqlalchemy import and_, desc, false, true
 
 from galaxy import managers, model, util, web
 from galaxy.model.item_attrs import UsesItemRatings
 from galaxy.util import unicodify
-from galaxy.util.json import loads
-from galaxy.util.sanitize_html import sanitize_html, _BaseHTMLProcessor
+from galaxy.util.sanitize_html import _BaseHTMLProcessor, sanitize_html
 from galaxy.web import error, url_for
 from galaxy.web.base.controller import BaseUIController, SharableMixin, UsesStoredWorkflowMixin, UsesVisualizationMixin
-from galaxy.web.framework.helpers import time_ago, grids
+from galaxy.web.framework.helpers import grids, time_ago
 
 
 def format_bool( b ):
@@ -103,7 +104,7 @@ class ItemSelectionGrid( grids.Grid ):
     # Grid definition.
     show_item_checkboxes = True
     template = "/page/select_items_grid.mako"
-    default_filter = { "deleted": "False" , "sharing": "All" }
+    default_filter = { "deleted": "False", "sharing": "All" }
     default_sort_key = "-update_time"
     use_async = True
     use_paging = True
@@ -757,16 +758,17 @@ class PageController( BaseUIController, SharableMixin,
         history.annotation = self.get_item_annotation_str( trans.sa_session, history.user, history )
 
         # include all datasets: hidden, deleted, and purged
-        history_dictionary = self.history_serializer.serialize_to_view( history,
-            view='detailed', user=trans.user, trans=trans )
+        history_dictionary = self.history_serializer.serialize_to_view(
+            history, view='detailed', user=trans.user, trans=trans
+        )
         contents = self.history_serializer.serialize_contents( history, 'contents', trans=trans, user=trans.user )
         history_dictionary[ 'annotation' ] = history.annotation
 
         filled = trans.fill_template( "history/embed.mako",
-            item=history,
-            user_is_owner=user_is_owner,
-            history_dict=history_dictionary,
-            content_dicts=contents )
+                                      item=history,
+                                      user_is_owner=user_is_owner,
+                                      history_dict=history_dictionary,
+                                      content_dicts=contents )
         return filled
 
     def _get_embedded_visualization_html( self, trans, id ):

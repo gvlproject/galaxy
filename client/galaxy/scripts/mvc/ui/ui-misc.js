@@ -42,7 +42,8 @@ define(['utils/utils',
                 message     : null,
                 status      : 'info',
                 cls         : '',
-                persistent  : false
+                persistent  : false,
+                fade        : true
             }).set( options );
             this.listenTo( this.model, 'change', this.render, this );
             this.render();
@@ -61,19 +62,28 @@ define(['utils/utils',
                 this.$el.addClass( 'alert' ).addClass( 'alert-' + status );
             }
             if ( this.model.get( 'message' ) ) {
-                this.$el.html( this.model.get( 'message' ) );
-                this.$el.fadeIn();
+                this.$el.html( this.messageForDisplay() );
+                this.$el[ this.model.get( 'fade' ) ? 'fadeIn' : 'show' ]();
                 this.timeout && window.clearTimeout( this.timeout );
                 if ( !this.model.get( 'persistent' ) ) {
                     var self = this;
                     this.timeout = window.setTimeout( function() {
-                        self.$el.fadeOut();
+                        self.model.set( 'message', '' );
                     }, 3000 );
                 }
             } else {
                 this.$el.fadeOut();
             }
             return this;
+        },
+        messageForDisplay: function() {
+            return _.escape( this.model.get( 'message' ) );
+        }
+    });
+
+    var UnescapedMessage = Message.extend({
+        messageForDisplay: function() {
+            return this.model.get( 'message' );
         }
     });
 
@@ -84,9 +94,12 @@ define(['utils/utils',
                 type            : 'text',
                 placeholder     : '',
                 disabled        : false,
+                readonly        : false,
                 visible         : true,
                 cls             : '',
-                area            : false
+                area            : false,
+                color           : null,
+                style           : null
             }).set( options );
             this.tagName = this.model.get( 'area' ) ? 'textarea' : 'input';
             this.setElement( $( '<' + this.tagName + '/>' ) );
@@ -101,14 +114,27 @@ define(['utils/utils',
             return this.model.get( 'value' );
         },
         render: function() {
+            var self = this;
             this.$el.removeClass()
                     .addClass( 'ui-' + this.tagName )
                     .addClass( this.model.get( 'cls' ) )
+                    .addClass( this.model.get( 'style' ) )
                     .attr( 'id', this.model.id )
                     .attr( 'type', this.model.get( 'type' ) )
                     .attr( 'placeholder', this.model.get( 'placeholder' ) )
-                    .val( this.model.get( 'value' ) );
-            this.model.get( 'disabled' ) ? this.$el.attr( 'disabled', true ) : this.$el.removeAttr( 'disabled' );
+                    .css( 'color', this.model.get( 'color' ) || '' )
+                    .css( 'border-color', this.model.get( 'color' ) || '' );
+            var datalist = this.model.get( 'datalist' );
+            if ( $.isArray( datalist ) && datalist.length > 0 ) {
+                this.$el.autocomplete( { source : function( request, response ) { response( self.model.get( 'datalist' ) ) },
+                                         change : function() { self._onchange() } } );
+            }
+            if ( this.model.get( 'value' ) !== this.$el.val() ) {
+                this.$el.val( this.model.get( 'value' ) );
+            }
+            _.each( [ 'readonly', 'disabled' ], function( attr_name ) {
+                self.model.get( attr_name ) ? self.$el.attr( attr_name, true ) : self.$el.removeAttr( attr_name );
+            });
             this.$el[ this.model.get( 'visible' ) ? 'show' : 'hide' ]();
             return this;
         },
@@ -140,21 +166,22 @@ define(['utils/utils',
     });
 
     return {
-        Button      : Buttons.ButtonDefault,
-        ButtonIcon  : Buttons.ButtonIcon,
-        ButtonCheck : Buttons.ButtonCheck,
-        ButtonMenu  : Buttons.ButtonMenu,
-        ButtonLink  : Buttons.ButtonLink,
-        Input       : Input,
-        Label       : Label,
-        Message     : Message,
-        Modal       : Modal,
-        RadioButton : Options.RadioButton,
-        Checkbox    : Options.Checkbox,
-        Radio       : Options.Radio,
-        Select      : Select,
-        Hidden      : Hidden,
-        Slider      : Slider,
-        Drilldown   : Drilldown
+        Button           : Buttons.ButtonDefault,
+        ButtonIcon       : Buttons.ButtonIcon,
+        ButtonCheck      : Buttons.ButtonCheck,
+        ButtonMenu       : Buttons.ButtonMenu,
+        ButtonLink       : Buttons.ButtonLink,
+        Input            : Input,
+        Label            : Label,
+        Message          : Message,
+        UnescapedMessage : UnescapedMessage,
+        Modal            : Modal,
+        RadioButton      : Options.RadioButton,
+        Checkbox         : Options.Checkbox,
+        Radio            : Options.Radio,
+        Select           : Select,
+        Hidden           : Hidden,
+        Slider           : Slider,
+        Drilldown        : Drilldown
     }
 });

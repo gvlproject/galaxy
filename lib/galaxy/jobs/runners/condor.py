@@ -1,20 +1,26 @@
 """
 Job control via the Condor DRM.
 """
-
-import os
 import logging
+import os
 
 from galaxy import model
-from galaxy.jobs.runners import AsynchronousJobState, AsynchronousJobRunner
-from galaxy.jobs.runners.util.condor import submission_params, build_submit_description
-from galaxy.jobs.runners.util.condor import condor_submit, condor_stop
-from galaxy.jobs.runners.util.condor import summarize_condor_log
+from galaxy.jobs.runners import (
+    AsynchronousJobRunner,
+    AsynchronousJobState
+)
+from galaxy.jobs.runners.util.condor import (
+    build_submit_description,
+    condor_stop,
+    condor_submit,
+    submission_params,
+    summarize_condor_log
+)
 from galaxy.util import asbool
 
 log = logging.getLogger( __name__ )
 
-__all__ = [ 'CondorJobRunner' ]
+__all__ = ( 'CondorJobRunner', )
 
 
 class CondorJobState( AsynchronousJobState ):
@@ -57,6 +63,14 @@ class CondorJobRunner( AsynchronousJobRunner ):
 
         # get destination params
         query_params = submission_params(prefix="", **job_destination.params)
+        container = None
+        universe = query_params.get('universe', None)
+        if universe and universe.strip().lower() == 'docker':
+            container = self._find_container( job_wrapper )
+            if container:
+                # HTCondor needs the image as 'docker_image'
+                query_params.update({'docker_image': container})
+
         galaxy_slots = query_params.get('request_cpus', None)
         if galaxy_slots:
             galaxy_slots_statement = 'GALAXY_SLOTS="%s"; export GALAXY_SLOTS_CONFIGURED="1"' % galaxy_slots
@@ -96,10 +110,11 @@ class CondorJobRunner( AsynchronousJobRunner ):
             log.exception( "(%s) failure preparing job script" % galaxy_id_tag )
             return
 
+        cleanup_job = job_wrapper.cleanup_job
         try:
             open(submit_file, "w").write(submit_file_contents)
-        except:
-            if self.app.config.cleanup_job == "always":
+        except Exception:
+            if cleanup_job == "always":
                 cjs.cleanup()
                 # job_wrapper.fail() calls job_wrapper.cleanup()
             job_wrapper.fail( "failure preparing submit file", exception=True )
@@ -109,7 +124,7 @@ class CondorJobRunner( AsynchronousJobRunner ):
         # job was deleted while we were preparing it
         if job_wrapper.get_state() == model.Job.states.DELETED:
             log.debug( "Job %s deleted by user before it entered the queue" % galaxy_id_tag )
-            if self.app.config.cleanup_job in ( "always", "onsuccess" ):
+            if cleanup_job in ("always", "onsuccess"):
                 os.unlink( submit_file )
                 cjs.cleanup()
                 job_wrapper.cleanup()

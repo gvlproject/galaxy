@@ -1,24 +1,21 @@
 from __future__ import absolute_import
 
-__all__ = [ "dumps", "loads", "safe_dumps", "json_fix", "validate_jsonrpc_request", "validate_jsonrpc_response", "jsonrpc_request", "jsonrpc_response" ]
-
-import copy
 import collections
+import copy
 import json
 import logging
 import math
 import random
 import string
 
-from six import text_type, string_types, iteritems
+from six import iteritems, string_types, text_type
 
-dumps = json.dumps
-loads = json.loads
+__all__ = ( "safe_dumps", "json_fix", "validate_jsonrpc_request", "validate_jsonrpc_response", "jsonrpc_request", "jsonrpc_response" )
 
 log = logging.getLogger( __name__ )
 
-to_json_string = dumps
-from_json_string = loads
+to_json_string = json.dumps
+from_json_string = json.loads
 
 
 def json_fix( val ):
@@ -56,6 +53,21 @@ def swap_inf_nan( val ):
         return val
 
 
+def safe_loads( arg ):
+    """
+    This is a wrapper around loads that returns the parsed value instead of
+    raising a value error. It also avoids autoconversion of non-iterables
+    i.e numeric and boolean values.
+    """
+    try:
+        loaded = json.loads( arg )
+        if loaded is not None and not isinstance( loaded, collections.Iterable ):
+            loaded = arg
+    except ( TypeError, ValueError ):
+        loaded = arg
+    return loaded
+
+
 def safe_dumps( *args, **kwargs ):
     """
     This is a wrapper around dumps that encodes Infinity and NaN values.  It's a
@@ -77,7 +89,7 @@ def safe_dumps( *args, **kwargs ):
 
 def validate_jsonrpc_request( request, regular_methods, notification_methods ):
     try:
-        request = loads( request )
+        request = json.loads( request )
     except Exception as e:
         return False, request, jsonrpc_response( id=None,
                                                  error=dict( code=-32700,
@@ -114,7 +126,7 @@ def validate_jsonrpc_request( request, regular_methods, notification_methods ):
 
 def validate_jsonrpc_response( response, id=None ):
     try:
-        response = loads( response )
+        response = json.loads( response )
     except Exception as e:
         log.error( 'Response was not valid JSON: %s' % str( e ) )
         log.debug( 'Response was: %s' % response )

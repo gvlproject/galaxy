@@ -1,6 +1,8 @@
 """
 Migration script to create the tool_id_guid_map table.
 """
+from __future__ import print_function
+
 import datetime
 import logging
 import sys
@@ -35,12 +37,12 @@ ToolIdGuidMap_table = Table( "tool_id_guid_map", metadata,
 
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    print __doc__
+    print(__doc__)
     metadata.reflect()
     try:
         ToolIdGuidMap_table.create()
-    except Exception, e:
-        log.debug( "Creating tool_id_guid_map table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating tool_id_guid_map table failed.")
 
 
 def downgrade(migrate_engine):
@@ -48,5 +50,5 @@ def downgrade(migrate_engine):
     metadata.reflect()
     try:
         ToolIdGuidMap_table.drop()
-    except Exception, e:
-        log.debug( "Dropping tool_id_guid_map table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping tool_id_guid_map table failed.")

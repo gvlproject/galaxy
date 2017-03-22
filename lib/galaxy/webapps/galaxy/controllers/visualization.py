@@ -1,29 +1,29 @@
 from __future__ import absolute_import
 
 import logging
+from json import loads
 
 from markupsafe import escape
 from paste.httpexceptions import HTTPNotFound, HTTPBadRequest
 from six import string_types
 from sqlalchemy import and_, desc, false, or_, true
 
-from galaxy import managers
-from galaxy import model, web
-from galaxy import util
+from galaxy import managers, model, util, web
 from galaxy.datatypes.interval import Bed
 from galaxy.model.item_attrs import UsesAnnotations, UsesItemRatings
-from galaxy.util.json import loads
 from galaxy.util.sanitize_html import sanitize_html
-from galaxy.visualization.plugins import registry
-from galaxy.visualization.data_providers.phyloviz import PhylovizDataProvider
 from galaxy.visualization.data_providers.genome import RawBedDataProvider
+from galaxy.visualization.data_providers.phyloviz import PhylovizDataProvider
 from galaxy.visualization.genomes import decode_dbkey
 from galaxy.visualization.genomes import GenomeRegion
+from galaxy.visualization.plugins import registry
 from galaxy.web import error
 from galaxy.web.base.controller import BaseUIController, SharableMixin, UsesVisualizationMixin
 from galaxy.web.framework.helpers import grids, time_ago
 
 from .library import LibraryListGrid
+import os
+import yaml
 
 log = logging.getLogger( __name__ )
 
@@ -65,7 +65,7 @@ class HistorySelectionGrid( grids.Grid ):
     datasets_action = 'list_history_datasets'
     datasets_param = "f-history"
     columns = [
-        NameColumn( "History Name", key="name", filterable="standard", inbound=True ),
+        NameColumn( "History Name", key="name", filterable="standard", target="inbound" ),
         grids.GridColumn( "Last Updated", key="update_time", format=time_ago, visible=False ),
         DbKeyPlaceholderColumn( "Dbkey", key="dbkey", model_class=model.HistoryDatasetAssociation, visible=False )
     ]
@@ -88,7 +88,7 @@ class LibrarySelectionGrid( LibraryListGrid ):
     datasets_action = 'list_library_datasets'
     datasets_param = "f-library"
     columns = [
-        NameColumn( "Library Name", key="name", filterable="standard", inbound=True  )
+        NameColumn( "Library Name", key="name", filterable="standard", target="inbound"  )
     ]
     num_rows_per_page = 10
     use_async = True
@@ -124,7 +124,7 @@ class HistoryDatasetsSelectionGrid( grids.Grid ):
     title = "Add Datasets"
     template = "tracks/history_datasets_select_grid.mako"
     model_class = model.HistoryDatasetAssociation
-    default_filter = { "deleted" : "False" , "shared" : "All" }
+    default_filter = { "deleted": "False", "shared": "All" }
     default_sort_key = "-hid"
     use_async = True
     use_paging = False
@@ -224,12 +224,12 @@ class VisualizationListGrid( grids.Grid ):
             key="free-text-search", visible=False, filterable="standard" )
     )
     global_actions = [
-        grids.GridAction( "Create new visualization", dict( action='create' ), inbound=True )
+        grids.GridAction( "Create new visualization", dict( action='create' ), target="inbound" )
     ]
     operations = [
         grids.GridOperation( "Open", allow_multiple=False, url_args=get_url_args ),
         grids.GridOperation( "Open in Circster", allow_multiple=False, condition=( lambda item: item.type == 'trackster' ), url_args=dict( action='circster' ) ),
-        grids.GridOperation( "Edit Attributes", allow_multiple=False, url_args=dict( action='edit'), inbound=True),
+        grids.GridOperation( "Edit Attributes", allow_multiple=False, url_args=dict( action='edit'), target="inbound" ),
         grids.GridOperation( "Copy", allow_multiple=False, condition=( lambda item: not item.deleted )),
         grids.GridOperation( "Share or Publish", allow_multiple=False, condition=( lambda item: not item.deleted ), async_compatible=False ),
         grids.GridOperation( "Delete", condition=( lambda item: not item.deleted ), confirm="Are you sure you want to delete this visualization?" ),
@@ -613,7 +613,8 @@ class VisualizationController( BaseUIController, SharableMixin, UsesVisualizatio
 
         if self.create_item_slug( trans.sa_session, visualization ):
             trans.sa_session.flush()
-        return_dict = { "name" : visualization.title, "link" : web.url_for(controller='visualization', action="display_by_username_and_slug", username=visualization.user.username, slug=visualization.slug ) }
+        return_dict = { "name": visualization.title,
+                        "link": web.url_for(controller='visualization', action="display_by_username_and_slug", username=visualization.user.username, slug=visualization.slug ) }
         return return_dict
 
     @web.expose
@@ -748,7 +749,7 @@ class VisualizationController( BaseUIController, SharableMixin, UsesVisualizatio
         plugin = self._get_plugin_from_registry( trans, visualization_name )
         try:
             return plugin.render( trans=trans, embedded=embedded, **kwargs )
-        except Exception, exception:
+        except Exception as exception:
             self._handle_plugin_error( trans, visualization_name, exception )
 
     def _get_plugin_from_registry( self, trans, visualization_name ):
@@ -794,7 +795,7 @@ class VisualizationController( BaseUIController, SharableMixin, UsesVisualizatio
         plugin = self._get_plugin_from_registry( trans, visualization.type )
         try:
             return plugin.render_saved( visualization, trans=trans, **kwargs )
-        except Exception, exception:
+        except Exception as exception:
             self._handle_plugin_error( trans, visualization.type, exception )
 
     def _POST_to_saved( self, trans, id=None, revision=None, type=None, config=None, title=None, **kwargs ):
@@ -881,7 +882,7 @@ class VisualizationController( BaseUIController, SharableMixin, UsesVisualizatio
             }
 
         # fill template
-        return trans.fill_template('galaxy.panels.mako', config={'right_panel' : True, 'app' : app})
+        return trans.fill_template('galaxy.panels.mako', config={'right_panel': True, 'app': app})
 
     @web.expose
     def circster( self, trans, id=None, hda_ldda=None, dataset_id=None, dbkey=None ):
@@ -954,7 +955,7 @@ class VisualizationController( BaseUIController, SharableMixin, UsesVisualizatio
         """
         regions = regions or '{}'
         # Need to create history if necessary in order to create tool form.
-        trans.get_history( create=True )
+        trans.get_history( most_recent=True, create=True )
 
         if id:
             # Loading a shared visualization.
@@ -1014,6 +1015,45 @@ class VisualizationController( BaseUIController, SharableMixin, UsesVisualizatio
                 'saved_visualization' : False
             }
         return trans.fill_template_mako( "visualization/phyloviz.mako", data=data, config=config )
+
+    @web.expose
+    @web.require_login( "run Galaxy Interactive Environments" )
+    def gie_list( self, trans, **kwargs ):
+        if not hasattr( self, 'gie_image_map' ):
+            self.gie_image_map = {}
+
+            for gie_dir in self.app.config.gie_dirs:
+                gie_list = os.listdir( gie_dir )
+                for gie in gie_list:
+                    gie_path = os.path.join(gie_dir, gie)
+
+                    if not os.path.isdir(gie_path):
+                        continue
+
+                    if not os.path.exists(self._gie_config_dir(gie_path)):
+                        continue
+
+                    if os.path.exists( self._gie_config_dir( gie_path, 'allowed_images.yml' ) ):
+                        image_file = self._gie_config_dir( gie_path, 'allowed_images.yml' )
+                    elif os.path.exists( self._gie_config_dir( gie_path, 'allowed_images.yml.sample' ) ):
+                        image_file = self._gie_config_dir( gie_path, 'allowed_images.yml.sample' )
+                    else:
+                        continue
+
+                    with open( image_file, 'r' ) as handle:
+                        self.gie_image_map[gie] = yaml.load( handle )
+
+        return trans.fill_template_mako(
+            "visualization/gie.mako",
+            gie_image_map=self.gie_image_map,
+            history=trans.get_history(),
+        )
+
+    def _gie_config_dir(self, gie_path, *args):
+        nargs = [gie_path, 'config']
+        if len(args) > 0:
+            nargs += args
+        return os.path.join(*nargs)
 
     @web.json
     def bookmarks_from_dataset( self, trans, hda_id=None, ldda_id=None ):

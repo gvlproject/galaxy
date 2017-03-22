@@ -8,18 +8,16 @@ usage: reset_metadata_on_installed_repositories.py key
 Here is a working example of how to use this script.
 python ./reset_metadata_on_installed_repositories.py -a 22be3b -u http://localhost:8763/
 """
-
 import argparse
-import os
-import sys
-sys.path.insert( 0, os.path.dirname( __file__ ) )
+
 from common import submit
 
+
 def main( options ):
-    api_key = options.api
     base_galaxy_url = options.galaxy_url.rstrip( '/' )
     url = '%s/api/tool_shed_repositories/reset_metadata_on_installed_repositories' % base_galaxy_url
     submit( options.api, url, {} )
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser( description='Reset metadata on all Tool Shed repositories installed into Galaxy via the Galaxy API.' )

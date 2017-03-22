@@ -4,30 +4,27 @@ Galaxy Metadata
 """
 
 import copy
-import cPickle
 import json
+import logging
 import os
 import shutil
 import sys
 import tempfile
 import weakref
-
 from os.path import abspath
 
 from six import string_types
+from six.moves import cPickle
 from sqlalchemy.orm import object_session
 
 import galaxy.model
-from galaxy.util import listify
-from galaxy.util.object_wrapper import sanitize_lists_to_string
-from galaxy.util import stringify_dictionary_keys
-from galaxy.util import string_as_bool
-from galaxy.util import in_directory
+from galaxy.util import (in_directory, listify, string_as_bool,
+                         stringify_dictionary_keys)
 from galaxy.util.json import safe_dumps
+from galaxy.util.object_wrapper import sanitize_lists_to_string
 from galaxy.util.odict import odict
 from galaxy.web import form_builder
 
-import logging
 log = logging.getLogger(__name__)
 
 STATEMENTS = "__galaxy_statements__"  # this is the name of the property in a Datatype class where new metadata spec element Statements are stored
@@ -96,13 +93,14 @@ class MetadataCollection( object ):
             return default
 
     def items(self):
-        return iter( [ ( k, self.get( k ) ) for k in self.spec.iterkeys() ] )
+        return iter( [ ( k, self.get( k ) ) for k in self.spec.keys() ] )
 
     def __str__(self):
         return dict( self.items() ).__str__()
 
-    def __nonzero__( self ):
+    def __bool__( self ):
         return bool( self.parent._metadata )
+    __nonzero__ = __bool__
 
     def __getattr__( self, name ):
         if name in self.spec:
@@ -208,7 +206,7 @@ class MetadataSpecCollection( odict ):
         self[item.name] = item
 
     def iter( self ):
-        return self.itervalues()
+        return iter(self.values())
 
     def __getattr__( self, name ):
         return self.get( name )
@@ -342,6 +340,7 @@ class MetadataElementSpec( object ):
         spec_dict.update( self.__dict__ )
         return ( "{name} ({param_class}): {desc}, defaults to '{default}'".format( **spec_dict ) )
 
+
 # create a statement class that, when called,
 #   will add a new MetadataElementSpec to a class's metadata_spec
 MetadataElement = Statement( MetadataElementSpec )
@@ -455,7 +454,7 @@ class RangeParameter( SelectParameter ):
         other_values = other_values or {}
 
         if values is None:
-            values = zip( range( self.min, self.max, self.step ), range( self.min, self.max, self.step ))
+            values = list(zip( range( self.min, self.max, self.step ), range( self.min, self.max, self.step ) ))
         return SelectParameter.get_html_field( self, value=value, context=context, other_values=other_values, values=values, **kwd )
 
     def get_html( self, value, context=None, other_values=None, values=None, **kwd ):
@@ -463,7 +462,7 @@ class RangeParameter( SelectParameter ):
         other_values = other_values or {}
 
         if values is None:
-            values = zip( range( self.min, self.max, self.step ), range( self.min, self.max, self.step ))
+            values = list(zip( range( self.min, self.max, self.step ), range( self.min, self.max, self.step ) ))
         return SelectParameter.get_html( self, value, context=context, other_values=other_values, values=values, **kwd )
 
     @classmethod
@@ -481,7 +480,7 @@ class ColumnParameter( RangeParameter ):
 
         if values is None and context:
             column_range = range( 1, ( context.columns or 0 ) + 1, 1 )
-            values = zip( column_range, column_range )
+            values = list(zip( column_range, column_range ))
         return RangeParameter.get_html_field( self, value=value, context=context, other_values=other_values, values=values, **kwd )
 
     def get_html( self, value, context=None, other_values=None, values=None, **kwd ):
@@ -490,7 +489,7 @@ class ColumnParameter( RangeParameter ):
 
         if values is None and context:
             column_range = range( 1, ( context.columns or 0 ) + 1, 1 )
-            values = zip( column_range, column_range )
+            values = list(zip( column_range, column_range ))
         return RangeParameter.get_html( self, value, context=context, other_values=other_values, values=values, **kwd )
 
 
@@ -818,7 +817,7 @@ class JobExternalOutputMetadataWrapper( object ):
                 metadata_files.filename_override_metadata = abspath( tempfile.NamedTemporaryFile( dir=tmp_dir, prefix="metadata_override_%s_" % key ).name )
                 open( metadata_files.filename_override_metadata, 'wb+' )  # create the file on disk, so it cannot be reused by tempfile (unlikely, but possible)
                 override_metadata = []
-                for meta_key, spec_value in dataset.metadata.spec.iteritems():
+                for meta_key, spec_value in dataset.metadata.spec.items():
                     if isinstance( spec_value.param, FileParameter ) and dataset.metadata.get( meta_key, None ) is not None:
                         metadata_temp = MetadataTempFile()
                         shutil.copy( dataset.metadata.get( meta_key, None ).file_name, metadata_temp.file_name )
@@ -874,7 +873,8 @@ class JobExternalOutputMetadataWrapper( object ):
             sa_session.add( metadata_files )
             sa_session.flush()
 
-__all__ = [
+
+__all__ = (
     "Statement",
     "MetadataElement",
     "MetadataCollection",
@@ -892,4 +892,4 @@ __all__ = [
     "FileParameter",
     "MetadataTempFile",
     "JobExternalOutputMetadataWrapper",
-]
+)

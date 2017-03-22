@@ -1,7 +1,8 @@
 """
 Migration script to create tables for handling post-job actions.
 """
-import datetime
+from __future__ import print_function
+
 import logging
 
 from sqlalchemy import Column, ForeignKey, Integer, MetaData, String, Table
@@ -11,7 +12,6 @@ from galaxy.model.custom_types import JSONType
 
 logging.basicConfig( level=logging.DEBUG )
 log = logging.getLogger( __name__ )
-now = datetime.datetime.utcnow
 metadata = MetaData()
 
 PostJobAction_table = Table("post_job_action", metadata,
@@ -31,13 +31,13 @@ tables = [PostJobAction_table]  # , PostJobActionAssociation_table]
 
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    print __doc__
+    print(__doc__)
     metadata.reflect()
     for table in tables:
         try:
             table.create()
-        except:
-            log.warn( "Failed to create table '%s', ignoring (might result in wrong schema)" % table.name )
+        except Exception:
+            log.exception("Failed to create table '%s', ignoring (might result in wrong schema)" % table.name)
 
 
 def downgrade(migrate_engine):

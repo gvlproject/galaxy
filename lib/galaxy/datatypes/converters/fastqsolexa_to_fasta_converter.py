@@ -13,8 +13,8 @@ the order should be:
 Usage:
 %python fastqsolexa_to_fasta_converter.py <your_fastqsolexa_filename> <output_seq_filename> <output_score_filename>
 """
-
 import sys
+
 assert sys.version_info[:2] >= ( 2, 4 )
 
 
@@ -29,7 +29,7 @@ def __main__():
     fastq_block_lines = 0
     seq_title_startswith = ''
 
-    for i, line in enumerate( file( infile_name ) ):
+    for i, line in enumerate( open( infile_name ) ):
         line = line.rstrip()  # eliminate trailing space and new line characters
         if not line or line.startswith( '#' ):
             continue
@@ -49,6 +49,7 @@ def __main__():
             pass
 
     outfile.close()
+
 
 if __name__ == "__main__":
     __main__()

@@ -1,6 +1,8 @@
 """
 Add support for job destinations to the job table
 """
+from __future__ import print_function
+
 import logging
 
 from sqlalchemy import Column, MetaData, String, Table
@@ -10,13 +12,8 @@ from galaxy.model.custom_types import JSONType
 log = logging.getLogger( __name__ )
 
 
-def display_migration_details():
-    print ""
-    print "This migration script adds 'destination_id' and 'destination_params' columns to the Job table."
-
-
 def upgrade(migrate_engine):
-    print __doc__
+    print(__doc__)
     metadata = MetaData()
     metadata.bind = migrate_engine
     metadata.reflect()
@@ -26,15 +23,15 @@ def upgrade(migrate_engine):
     try:
         c.create( Job_table )
         assert c is Job_table.c.destination_id
-    except Exception, e:
-        log.error( "Adding column 'destination_id' to job table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Adding column 'destination_id' to job table failed.")
 
     c = Column( "destination_params", JSONType, nullable=True )
     try:
         c.create( Job_table )
         assert c is Job_table.c.destination_params
-    except Exception, e:
-        log.error( "Adding column 'destination_params' to job table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Adding column 'destination_params' to job table failed.")
 
 
 def downgrade(migrate_engine):
@@ -45,10 +42,10 @@ def downgrade(migrate_engine):
 
     try:
         Job_table.c.destination_params.drop()
-    except Exception, e:
-        log.error( "Dropping column 'destination_params' from job table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping column 'destination_params' from job table failed.")
 
     try:
         Job_table.c.destination_id.drop()
-    except Exception, e:
-        log.error( "Dropping column 'destination_id' from job table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping column 'destination_id' from job table failed.")

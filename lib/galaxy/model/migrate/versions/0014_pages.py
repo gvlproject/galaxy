@@ -3,6 +3,8 @@ Migration script to add support for "Pages".
   1) Creates Page and PageRevision tables
   2) Adds username column to User table
 """
+from __future__ import print_function
+
 import datetime
 import logging
 
@@ -33,7 +35,7 @@ PageRevision_table = Table( "page_revision", metadata,
 
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    print __doc__
+    print(__doc__)
     metadata.reflect()
     try:
         if migrate_engine.name == 'mysql':
@@ -48,13 +50,12 @@ def upgrade(migrate_engine):
             # Create slug index manually afterward.
             i = Index( "ix_page_slug", Page_table.c.slug, mysql_length=200)
             i.create()
-    except Exception, ex:
-        log.debug(ex)
-        log.debug( "Could not create page table" )
+    except Exception:
+        log.exception("Could not create page table")
     try:
         PageRevision_table.create()
-    except:
-        log.debug( "Could not create page_revision table" )
+    except Exception:
+        log.exception("Could not create page_revision table")
 
     # Add 1 column to the user table
     User_table = Table( "galaxy_user", metadata, autoload=True )

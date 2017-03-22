@@ -69,7 +69,7 @@ class FormDefinitionFieldFactory( object ):
     type = None
 
     def __get_stored_field_type( self, **kwds ):
-        raise 'not implemented'
+        raise Exception( 'not implemented' )
 
     def new( self, name=None, label=None, required=False, helptext=None, default=None, visible=True, layout=None ):
         """
@@ -310,6 +310,7 @@ class FormDefinitionSelectFieldFactory( FormDefinitionFieldFactory ):
             assert value is not None, 'Must provide a "value" for a select option'
             rval['selectlist'].append( value )
         return rval
+
 
 field_type_factories = dict( [ ( field.type, field() ) for field in ( FormDefinitionTextFieldFactory,
                                                                       FormDefinitionPasswordFieldFactory,

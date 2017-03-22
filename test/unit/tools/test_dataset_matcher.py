@@ -1,12 +1,14 @@
 from unittest import TestCase
 from xml.etree.ElementTree import XML
 
-from galaxy import model
-from galaxy.util import bunch
-from galaxy.tools.parameters import basic
-from galaxy.tools.parameters import dataset_matcher
-
 import tools_support
+from galaxy import model
+from galaxy.tools.parameters import (
+    basic,
+    dataset_matcher
+)
+from galaxy.util import bunch
+
 from .test_data_parameters import MockHistoryDatasetAssociation
 
 
@@ -131,6 +133,7 @@ class DatasetMatcherTestCase( TestCase, tools_support.UsesApp ):
         self.tool = bunch.Bunch(
             app=self.app,
             tool_type="default",
+            valid_input_states=model.Dataset.valid_input_states,
         )
         self.current_user_roles = []
         self.other_values = {}

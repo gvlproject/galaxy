@@ -21,10 +21,8 @@ log = logging.getLogger( __name__ )
 
 comptypes = []
 
-# TODO: not used in this file
-from galaxy.util.json import loads  # noqa
 try:
-    import zlib  # noqa
+    import zlib  # noqa: F401
     comptypes.append( 'zip' )
 except ImportError:
     pass
@@ -60,7 +58,7 @@ class HistoryDatasetAssociationListGrid( grids.Grid ):
         grids.TextColumn( "Name", key="name",
                           # Link name to dataset's history.
                           link=( lambda item: iff( item.history.deleted, None, dict( operation="switch", id=item.id ) ) ), filterable="advanced", attach_popup=True ),
-        HistoryColumn( "History", key="history", sortable=False, inbound=True,
+        HistoryColumn( "History", key="history", sortable=False, target="inbound",
                        link=( lambda item: iff( item.history.deleted, None, dict( operation="switch_history", id=item.id ) ) ) ),
         grids.IndividualTagsColumn( "Tags", key="tags", model_tag_association_class=model.HistoryDatasetAssociationTagAssociation, filterable="advanced", grid_name="HistoryDatasetAssocationListGrid" ),
         StatusColumn( "Status", key="deleted", attach_popup=False ),
@@ -169,7 +167,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
             error_reporter = EmailErrorReporter( id, trans.app )
             error_reporter.send_report( user=trans.user, email=email, message=message )
             return trans.show_ok_message( "Your error report has been sent" )
-        except Exception, e:
+        except Exception as e:
             return trans.show_error_message( "An error occurred sending the report by email: %s" % str( e ) )
 
     @web.expose
@@ -183,8 +181,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
         if not data or not self._can_access_dataset( trans, data ):
             return trans.show_error_message( "You are not allowed to access this dataset" )
 
-        valid_chars = '.,^_-()[]0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-        fname = ''.join(c in valid_chars and c or '_' for c in data.name)[0:150]
+        fname = ''.join(c in util.FILENAME_VALID_CHARS and c or '_' for c in data.name)[0:150]
 
         file_ext = data.metadata.spec.get(metadata_name).get("file_ext", metadata_name)
         trans.response.headers["Content-Type"] = "application/octet-stream"
@@ -234,11 +231,17 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
             return trans.app.object_store.file_ready(data.dataset)
 
     @web.expose
-    def display(self, trans, dataset_id=None, preview=False, filename=None, to_ext=None, chunk=None, **kwd):
+    def display(self, trans, dataset_id=None, preview=False, filename=None, to_ext=None, offset=None, ck_size=None, **kwd):
         data = self._check_dataset(trans, dataset_id)
         if not isinstance( data, trans.app.model.DatasetInstance ):
             return data
-        return data.datatype.display_data(trans, data, preview, filename, to_ext, chunk, **kwd)
+        # Ensure offset is an integer before passing through to datatypes.
+        if offset:
+            offset = int(offset)
+        # Ensure ck_size is an integer before passing through to datatypes.
+        if ck_size:
+            ck_size = int(ck_size)
+        return data.datatype.display_data(trans, data, preview, filename, to_ext, offset=offset, ck_size=ck_size, **kwd)
 
     @web.expose
     def edit(self, trans, dataset_id=None, filename=None, hid=None, **kwd):
@@ -267,7 +270,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
             data = history.datasets[ int( hid ) - 1 ]
             id = None
         elif dataset_id is not None:
-            id = trans.app.security.decode_id( dataset_id )
+            id = self.decode_id( dataset_id )
             data = trans.sa_session.query( self.app.model.HistoryDatasetAssociation ).get( id )
         else:
             trans.log_event( "dataset_id and hid are both None, cannot load a dataset to edit" )
@@ -319,8 +322,8 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
                             continue
                         optional = params.get("is_" + name, None)
                         other = params.get("or_" + name, None)
-                        if optional and optional == 'true':
-                            # optional element... == 'true' actually means it is NOT checked (and therefore omitted)
+                        if optional and optional == '__NOTHING__':
+                            # optional element... == '__NOTHING__' actually means it is NOT checked (and therefore omitted)
                             setattr(data.metadata, name, None)
                         else:
                             if other:
@@ -340,7 +343,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
 #                            em_payload = None
 #                            try:
 #                                em_payload = loads(em_string)
-#                            except Exception, e:
+#                            except Exception as e:
 #                                message = 'Invalid JSON input'
 #                                error = True
 #                            if em_payload is not None:
@@ -475,7 +478,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
                         assert trans.user.id == hda.history.user_id, "HistoryDatasetAssocation does not belong to current user"
                     hdas.append( hda )
                 else:
-                    log.warn( "Invalid history_dataset_association id '%r' passed to list", hda_id )
+                    log.warning( "Invalid history_dataset_association id '%r' passed to list", hda_id )
 
             if hdas:
                 if operation == "switch" or operation == "switch_history":
@@ -594,7 +597,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
 
             # If data is binary or an image, stream without template; otherwise, use display template.
             # TODO: figure out a way to display images in display template.
-            if isinstance(dataset.datatype, datatypes.binary.Binary) or isinstance(dataset.datatype, datatypes.images.Image) or isinstance(dataset.datatype, datatypes.images.Html):
+            if isinstance(dataset.datatype, datatypes.binary.Binary) or isinstance(dataset.datatype, datatypes.images.Image) or isinstance(dataset.datatype, datatypes.text.Html):
                 trans.response.set_content_type( dataset.get_mime() )
                 return open( dataset.file_name )
             else:
@@ -716,7 +719,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
             dataset_hash, user_hash = encode_dataset_user( trans, data, user )
             try:
                 display_link = display_app.get_link( link_name, data, dataset_hash, user_hash, trans, app_kwds )
-            except Exception, e:
+            except Exception as e:
                 log.debug( "Error generating display_link: %s", e )
                 # User can sometimes recover from, e.g. conversion errors by fixing input metadata, so use conflict
                 return paste.httpexceptions.HTTPConflict( "Error generating display_link: %s" % e )
@@ -741,7 +744,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
                         # get param name from url param name
                         try:
                             action_param = display_link.get_param_name_by_url( action_param )
-                        except ValueError, e:
+                        except ValueError as e:
                             log.debug( e )
                             return paste.httpexceptions.HTTPNotFound( str( e ) )
                         value = display_link.get_param_value( action_param )
@@ -756,7 +759,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
                                     file_name = value.file_name
                                 content_length = os.path.getsize( file_name )
                                 rval = open( file_name )
-                            except OSError, e:
+                            except OSError as e:
                                 log.debug( "Unable to access requested file in display application: %s", e )
                                 return paste.httpexceptions.HTTPNotFound( "This file is no longer available." )
                         else:
@@ -797,7 +800,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
         status = 'done'
         id = None
         try:
-            id = trans.app.security.decode_id( dataset_id )
+            id = self.decode_id( dataset_id )
             hda = trans.sa_session.query( self.app.model.HistoryDatasetAssociation ).get( id )
             assert hda, 'Invalid HDA: %s' % id
             # Walk up parent datasets to find the containing history
@@ -811,7 +814,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
             trans.log_event( "Dataset id %s marked as deleted" % str(id) )
             self.hda_manager.stop_creating_job( hda )
             trans.sa_session.flush()
-        except Exception, e:
+        except Exception as e:
             msg = 'HDA deletion failed (encoded: %s, decoded: %s)' % ( dataset_id, id )
             log.exception( msg + ': ' + str( e ) )
             trans.log_event( msg )
@@ -824,7 +827,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
         status = 'done'
         id = None
         try:
-            id = trans.app.security.decode_id( dataset_id )
+            id = self.decode_id( dataset_id )
             history = trans.get_history()
             hda = trans.sa_session.query( self.app.model.HistoryDatasetAssociation ).get( id )
             assert hda and hda.undeletable, 'Invalid HDA: %s' % id
@@ -847,7 +850,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
 
     def _unhide( self, trans, dataset_id ):
         try:
-            id = trans.app.security.decode_id( dataset_id )
+            id = self.decode_id( dataset_id )
         except:
             return False
         history = trans.get_history()
@@ -869,7 +872,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
         message = None
         status = 'done'
         try:
-            id = trans.app.security.decode_id( dataset_id )
+            id = self.decode_id( dataset_id )
             user = trans.get_user()
             hda = trans.sa_session.query( self.app.model.HistoryDatasetAssociation ).get( id )
             # Invalid HDA
@@ -909,7 +912,7 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
                 except:
                     log.exception( 'Unable to purge dataset (%s) on purge of HDA (%s):' % ( hda.dataset.id, hda.id ) )
             trans.sa_session.flush()
-        except Exception, exc:
+        except Exception as exc:
             msg = 'HDA purge failed (encoded: %s, decoded: %s): %s' % ( dataset_id, id, exc )
             log.exception( msg )
             trans.log_event( msg )
@@ -1045,19 +1048,22 @@ class DatasetInterface( BaseUIController, UsesAnnotations, UsesItemRatings, Uses
                 source_content_ids = source_content_ids.split(",")
             encoded_dataset_collection_ids = [ s[ len("dataset_collection|"): ] for s in source_content_ids if s.startswith("dataset_collection|") ]
             encoded_dataset_ids = [ s[ len("dataset|"): ] for s in source_content_ids if s.startswith("dataset|") ]
-            decoded_dataset_collection_ids = set(map( trans.security.decode_id, encoded_dataset_collection_ids ))
-            decoded_dataset_ids = set(map( trans.security.decode_id, encoded_dataset_ids ))
+            decoded_dataset_collection_ids = set(map( self.decode_id, encoded_dataset_collection_ids ))
+            decoded_dataset_ids = set(map( self.decode_id, encoded_dataset_ids ))
         else:
             decoded_dataset_collection_ids = []
             decoded_dataset_ids = []
-        if target_history_id:
-            target_history_ids = [ self.decode_id(target_history_id) ]
-        elif target_history_ids:
-            if not isinstance( target_history_ids, list ):
-                target_history_ids = target_history_ids.split(",")
-            target_history_ids = list(set([ self.decode_id(h) for h in target_history_ids if h ]))
-        else:
+        if new_history_name:
             target_history_ids = []
+        else:
+            if target_history_id:
+                target_history_ids = [ self.decode_id(target_history_id) ]
+            elif target_history_ids:
+                if not isinstance( target_history_ids, list ):
+                    target_history_ids = target_history_ids.split(",")
+                target_history_ids = list(set([ self.decode_id(h) for h in target_history_ids if h ]))
+            else:
+                target_history_ids = []
         done_msg = error_msg = ""
         new_history = None
         if do_copy:

@@ -1,20 +1,20 @@
 ﻿"""
 Unit tests for ``galaxy.web.framework.webapp``
 """
+import logging
 import os
-import imp
+import re
+import sys
 import unittest
 
-import logging
-log = logging.getLogger( __name__ )
-
-test_utils = imp.load_source( 'test_utils',
-    os.path.join( os.path.dirname( __file__), '../../unittest_utils/utility.py' ) )
-import galaxy_mock
-
-import re
-from galaxy.web.framework import webapp as Webapp
 import galaxy.config
+from galaxy.web.framework import webapp as Webapp
+
+unit_root = os.path.abspath( os.path.join( os.path.dirname( __file__ ), os.pardir, os.pardir ) )
+sys.path.insert( 1, unit_root )
+from unittest_utils import galaxy_mock
+
+log = logging.getLogger( __name__ )
 
 
 class StubGalaxyWebTransaction( Webapp.GalaxyWebTransaction ):
@@ -32,7 +32,7 @@ class CORSParsingMockConfig( galaxy_mock.MockAppConfig ):
         self.allowed_origin_hostnames = self._parse_allowed_origin_hostnames( kwargs )
 
 
-class GalaxyWebTransaction_Headers_TestCase( test_utils.unittest.TestCase ):
+class GalaxyWebTransaction_Headers_TestCase( unittest.TestCase ):
 
     def _new_trans( self, allowed_origin_hostnames=None ):
         app = galaxy_mock.MockApp()
@@ -56,12 +56,12 @@ class GalaxyWebTransaction_Headers_TestCase( test_utils.unittest.TestCase ):
 
         # falsy listify value should return None
         self.assertEqual( config._parse_allowed_origin_hostnames({
-            "allowed_origin_hostnames" : ""
+            "allowed_origin_hostnames": ""
         }), None )
 
         # should parse regex if using fwd slashes, string otherwise
         hostnames = config._parse_allowed_origin_hostnames({
-            "allowed_origin_hostnames" : "/host\d{2}/,geocities.com,miskatonic.edu"
+            "allowed_origin_hostnames": "/host\d{2}/,geocities.com,miskatonic.edu"
         })
         self.assertTrue( isinstance( hostnames[0], re._pattern_type ) )
         self.assertTrue( isinstance( hostnames[1], str ) )

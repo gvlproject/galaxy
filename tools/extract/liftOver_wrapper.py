@@ -36,6 +36,7 @@ def safe_bed_file(infile):
     out_handle.close()
     return fname
 
+
 if len( sys.argv ) < 9:
     stop_err( "USAGE: prog input out_file1 out_file2 input_dbkey output_dbkey infile_type minMatch multiple <minChainT> <minChainQ> <minSizeQ>" )
 
@@ -79,7 +80,7 @@ try:
         stderr = proc.stderr.read()
         if returncode != 0:
             raise Exception(stderr)
-    except Exception, e:
+    except Exception as e:
         raise Exception('Exception caught attempting conversion: ' + str( e ))
 finally:
     os.remove(safe_infile)

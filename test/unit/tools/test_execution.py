@@ -1,15 +1,14 @@
 """ Test Tool execution and state handling logic.
 """
-
 from unittest import TestCase
 
+from paste import httpexceptions
+
 import galaxy.model
+import tools_support
 from galaxy.tools.parameters import params_to_incoming
 from galaxy.util.bunch import Bunch
 from galaxy.util.odict import odict
-import tools_support
-
-from paste import httpexceptions
 
 BASE_REPEAT_TOOL_CONTENTS = '''<tool id="test_tool" name="Test Tool">
     <command>echo "$param1" #for $r in $repeat# "$r.param2" #end for# &lt; $out1</command>
@@ -60,7 +59,7 @@ class ToolExecutionTestCase( TestCase, tools_support.UsesApp, tools_support.Uses
         self.tool_action.raise_exception( )
         try:
             self.__handle_with_incoming( param1="moo" )
-        except Exception, e:
+        except Exception as e:
             assert 'Error executing tool' in str( e )
 
     def test_execute_errors( self ):
@@ -68,7 +67,7 @@ class ToolExecutionTestCase( TestCase, tools_support.UsesApp, tools_support.Uses
         self.tool_action.return_error( )
         try:
             self.__handle_with_incoming( param1="moo" )
-        except Exception, e:
+        except Exception as e:
             assert 'Test Error Message' in str( e )
 
     def test_redirect( self ):
@@ -91,7 +90,7 @@ class ToolExecutionTestCase( TestCase, tools_support.UsesApp, tools_support.Uses
         self._init_tool( tools_support.SIMPLE_TOOL_CONTENTS )
         try:
             self.__handle_with_incoming( param1="moo", rerun_remap_job_id='123' )
-        except Exception, e:
+        except Exception as e:
             assert 'invalid job' in str( e )
 
     def test_data_param_execute( self ):
@@ -200,7 +199,7 @@ class MockTrans( object ):
         self.app = app
         self.history = history
         self.user = None
-        self.history._active_datasets_children_and_roles = filter( lambda hda: hda.active and hda.history == history, self.app.model.context.model_objects[ galaxy.model.HistoryDatasetAssociation ] )
+        self.history._active_datasets_and_roles = [hda for hda in self.app.model.context.model_objects[ galaxy.model.HistoryDatasetAssociation ] if hda.active and hda.history == history]
         self.workflow_building_mode = False
         self.webapp = Bunch( name="galaxy" )
         self.sa_session = self.app.model.context

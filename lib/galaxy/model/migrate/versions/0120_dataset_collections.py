@@ -1,6 +1,8 @@
 """
 Migration script for tables related to dataset collections.
 """
+from __future__ import print_function
+
 import datetime
 import logging
 
@@ -128,7 +130,7 @@ TABLES = [
 
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    print __doc__
+    print(__doc__)
     metadata.reflect()
 
     for table in TABLES:
@@ -137,38 +139,34 @@ def upgrade(migrate_engine):
     try:
         hda_table = Table( "history_dataset_association", metadata, autoload=True )
         HiddenBeneathCollection_column.create( hda_table )
-    except Exception as e:
-        print str(e)
-        log.exception( "Creating HDA column failed." )
+    except Exception:
+        log.exception("Creating HDA column failed.")
 
 
 def downgrade(migrate_engine):
     metadata.bind = migrate_engine
     metadata.reflect()
 
-    for table in TABLES:
-        __drop(table)
-
     try:
         hda_table = Table( "history_dataset_association", metadata, autoload=True )
         hidden_beneath_collection_instance_id_col = hda_table.c.hidden_beneath_collection_instance_id
         hidden_beneath_collection_instance_id_col.drop()
-    except Exception as e:
-        print str(e)
-        log.exception( "Dropping HDA column failed." )
+    except Exception:
+        log.exception("Dropping HDA column failed.")
+
+    for table in reversed(TABLES):
+        __drop(table)
 
 
 def __create(table):
     try:
         table.create()
-    except Exception as e:
-        print str(e)
-        log.exception("Creating %s table failed: %s" % (table.name, str( e ) ) )
+    except Exception:
+        log.exception("Creating %s table failed." % table.name)
 
 
 def __drop(table):
     try:
         table.drop()
-    except Exception as e:
-        print str(e)
-        log.exception("Dropping %s table failed: %s" % (table.name, str( e ) ) )
+    except Exception:
+        log.exception("Dropping %s table failed." % table.name)

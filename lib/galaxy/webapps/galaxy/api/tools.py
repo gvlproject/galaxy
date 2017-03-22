@@ -1,21 +1,17 @@
+import logging
 import urllib
-
-from galaxy import exceptions
-from galaxy import web, util
-from galaxy import managers
-from galaxy.web import _future_expose_api_anonymous_and_sessionless as expose_api_anonymous_and_sessionless
-from galaxy.web import _future_expose_api_anonymous as expose_api_anonymous
-from galaxy.web import _future_expose_api as expose_api
-from galaxy.web.base.controller import BaseAPIController
-from galaxy.web.base.controller import UsesVisualizationMixin
-from galaxy.visualization.genomes import GenomeRegion
-from galaxy.util.json import dumps
-from galaxy.managers.collections_util import dictify_dataset_collection_instance
+from json import dumps
 
 import galaxy.queue_worker
+from galaxy import exceptions, managers, util, web
+from galaxy.managers.collections_util import dictify_dataset_collection_instance
+from galaxy.visualization.genomes import GenomeRegion
+from galaxy.web import _future_expose_api as expose_api
+from galaxy.web import _future_expose_api_anonymous as expose_api_anonymous
+from galaxy.web import _future_expose_api_anonymous_and_sessionless as expose_api_anonymous_and_sessionless
+from galaxy.web.base.controller import BaseAPIController
+from galaxy.web.base.controller import UsesVisualizationMixin
 
-
-import logging
 log = logging.getLogger( __name__ )
 
 
@@ -57,9 +53,14 @@ class ToolsController( BaseAPIController, UsesVisualizationMixin ):
             results = []
             if hits:
                 for hit in hits:
-                    tool = self._get_tool( hit )
-                    if tool:
-                        results.append( tool.id )
+                    try:
+                        tool = self._get_tool( hit, user=trans.user )
+                        if tool:
+                            results.append( tool.id )
+                    except exceptions.AuthenticationFailed:
+                        pass
+                    except exceptions.ObjectNotFound:
+                        pass
             return results
 
         # Find whether to detect.
@@ -105,7 +106,81 @@ class ToolsController( BaseAPIController, UsesVisualizationMixin ):
         """
         galaxy.queue_worker.send_control_task( trans.app, 'reload_tool', noop_self=True, kwargs={ 'tool_id': id } )
         message, status = trans.app.toolbox.reload_tool_by_id( id )
-        return { status: message }
+        if status == 'error':
+            raise exceptions.MessageException( message )
+        return { 'message': message }
+
+    @expose_api
+    @web.require_admin
+    def all_requirements(self, trans, **kwds):
+        """
+        GET /api/tools/all_requirements
+        Return list of unique requirements for all tools.
+        """
+
+        return trans.app.toolbox.all_requirements
+
+    @expose_api
+    @web.require_admin
+    def requirements(self, trans, id, **kwds):
+        """
+        GET /api/tools/{tool_id}/requirements
+        Return the resolver status for a specific tool id.
+        [{"status": "installed", "name": "hisat2", "versionless": false, "resolver_type": "conda", "version": "2.0.3", "type": "package"}]
+        """
+        tool = self._get_tool(id)
+        return tool.tool_requirements_status
+
+    @expose_api
+    @web.require_admin
+    def install_dependencies(self, trans, id, **kwds):
+        """
+        POST /api/tools/{tool_id}/dependencies
+
+        This endpoint is also available through POST /api/tools/{tool_id}/install_dependencies,
+        but will be deprecated in the future.
+
+        Attempts to install requirements via the dependency resolver
+
+        parameters:
+            build_dependency_cache:  If true, attempts to cache dependencies for this tool
+            force_rebuild:           If true and cache dir exists, attempts to delete cache dir
+        """
+        tool = self._get_tool(id)
+        tool._view.install_dependencies(tool.requirements)
+        if kwds.get('build_dependency_cache'):
+            tool.build_dependency_cache(**kwds)
+        # TODO: rework resolver install system to log and report what has been done.
+        # _view.install_dependencies should return a dict with stdout, stderr and success status
+        return tool.tool_requirements_status
+
+    @expose_api
+    @web.require_admin
+    def uninstall_dependencies(self, trans, id, **kwds):
+        """
+        DELETE /api/tools/{tool_id}/dependencies
+        Attempts to uninstall requirements via the dependency resolver
+
+        """
+        tool = self._get_tool(id)
+        tool._view.uninstall_dependencies(index=None, requirements=tool.requirements)
+        # TODO: rework resolver install system to log and report what has been done.
+        return tool.tool_requirements_status
+
+    @expose_api
+    @web.require_admin
+    def build_dependency_cache(self, trans, id, **kwds):
+        """
+        POST /api/tools/{tool_id}/build_dependency_cache
+        Attempts to cache installed dependencies.
+
+        parameters:
+            force_rebuild:           If true and chache dir exists, attempts to delete cache dir
+        """
+        tool = self._get_tool(id)
+        tool.build_dependency_cache(**kwds)
+        # TODO: Should also have a more meaningful return.
+        return tool.tool_requirements_status
 
     @expose_api
     @web.require_admin
@@ -176,15 +251,25 @@ class ToolsController( BaseAPIController, UsesVisualizationMixin ):
         tool_name_boost = self.app.config.get( 'tool_name_boost', 9 )
         tool_section_boost = self.app.config.get( 'tool_section_boost', 3 )
         tool_description_boost = self.app.config.get( 'tool_description_boost', 2 )
+        tool_label_boost = self.app.config.get( 'tool_label_boost', 1 )
+        tool_stub_boost = self.app.config.get( 'tool_stub_boost', 5 )
         tool_help_boost = self.app.config.get( 'tool_help_boost', 0.5 )
         tool_search_limit = self.app.config.get( 'tool_search_limit', 20 )
+        tool_enable_ngram_search = self.app.config.get( 'tool_enable_ngram_search', False )
+        tool_ngram_minsize = self.app.config.get( 'tool_ngram_minsize', 3 )
+        tool_ngram_maxsize = self.app.config.get( 'tool_ngram_maxsize', 4 )
 
         results = self.app.toolbox_search.search( q=q,
                                                   tool_name_boost=tool_name_boost,
                                                   tool_section_boost=tool_section_boost,
                                                   tool_description_boost=tool_description_boost,
+                                                  tool_label_boost=tool_label_boost,
+                                                  tool_stub_boost=tool_stub_boost,
                                                   tool_help_boost=tool_help_boost,
-                                                  tool_search_limit=tool_search_limit )
+                                                  tool_search_limit=tool_search_limit,
+                                                  tool_enable_ngram_search=tool_enable_ngram_search,
+                                                  tool_ngram_minsize=tool_ngram_minsize,
+                                                  tool_ngram_maxsize=tool_ngram_maxsize )
         return results
 
     @expose_api_anonymous_and_sessionless
@@ -219,9 +304,14 @@ class ToolsController( BaseAPIController, UsesVisualizationMixin ):
 
         # Get tool.
         tool_version = payload.get( 'tool_version', None )
-        tool = trans.app.toolbox.get_tool( payload[ 'tool_id' ] , tool_version ) if 'tool_id' in payload else None
+        tool = trans.app.toolbox.get_tool( payload[ 'tool_id' ], tool_version ) if 'tool_id' in payload else None
         if not tool or not tool.allow_user_access( trans.user ):
             raise exceptions.MessageException( 'Tool not found or not accessible.' )
+        if trans.app.config.user_activation_on:
+            if not trans.user:
+                log.warning( "Anonymous user attempts to execute tool, but account activation is turned on." )
+            elif not trans.user.active:
+                log.warning( "User \"%s\" attempts to execute tool, but account activation is turned on and user account is not active." % trans.user.email )
 
         # Set running history from payload parameters.
         # History not set correctly as part of this API call for
@@ -274,7 +364,7 @@ class ToolsController( BaseAPIController, UsesVisualizationMixin ):
             # so it's possible to figure out which newly created elements
             # correspond with which tool file outputs
             output_dict[ 'output_name' ] = output_name
-            outputs.append( trans.security.encode_dict_ids( output_dict ) )
+            outputs.append( trans.security.encode_dict_ids( output_dict, skip_startswith="metadata_" ) )
 
         for job in vars.get('jobs', []):
             rval[ 'jobs' ].append( self.encode_all_ids( trans, job.to_dict( view='collection' ), recursive=True ) )
@@ -299,8 +389,10 @@ class ToolsController( BaseAPIController, UsesVisualizationMixin ):
     def _get_tool( self, id, tool_version=None, user=None ):
         id = urllib.unquote_plus( id )
         tool = self.app.toolbox.get_tool( id, tool_version )
-        if not tool or not tool.allow_user_access( user ):
-            raise exceptions.ObjectNotFound("Could not find tool with id '%s'" % id)
+        if not tool:
+            raise exceptions.ObjectNotFound( "Could not find tool with id '%s'." % id )
+        if not tool.allow_user_access( user ):
+            raise exceptions.AuthenticationFailed( "Access denied, please login for tool with id '%s'." % id )
         return tool
 
     def _rerun_tool( self, trans, payload, **kwargs ):
@@ -519,7 +611,7 @@ class ToolsController( BaseAPIController, UsesVisualizationMixin ):
                     # TODO: set meta internally if dataset is small enough?
                     trans.app.datatypes_registry.set_external_metadata_tool.tool_action.execute( trans.app.datatypes_registry.set_external_metadata_tool,
                                                                                                  trans, incoming={ 'input1': new_dataset },
-                                                                                                 overwrite=False, job_params={ "source" : "trackster" } )
+                                                                                                 overwrite=False, job_params={ "source": "trackster" } )
                     # Add HDA subset association.
                     subset_association = trans.app.model.HistoryDatasetAssociationSubset( hda=input_dataset, subset=new_dataset, location=regions_str )
                     trans.sa_session.add( subset_association )
@@ -530,7 +622,7 @@ class ToolsController( BaseAPIController, UsesVisualizationMixin ):
 
                 # Add dataset to tool's parameters.
                 if not set_param_value( tool_params, jida.name, subset_dataset ):
-                    return { "error" : True, "message" : "error setting parameter %s" % jida.name }
+                    return { "error": True, "message": "error setting parameter %s" % jida.name }
 
         #
         # Execute tool and handle outputs.
@@ -538,10 +630,10 @@ class ToolsController( BaseAPIController, UsesVisualizationMixin ):
         try:
             subset_job, subset_job_outputs = tool.execute( trans, incoming=tool_params,
                                                            history=target_history,
-                                                           job_params={ "source" : "trackster" } )
-        except Exception, e:
+                                                           job_params={ "source": "trackster" } )
+        except Exception as e:
             # Lots of things can go wrong when trying to execute tool.
-            return { "error" : True, "message" : e.__class__.__name__ + ": " + str(e) }
+            return { "error": True, "message": e.__class__.__name__ + ": " + str(e) }
         if run_on_regions:
             for output in subset_job_outputs.values():
                 output.visible = False

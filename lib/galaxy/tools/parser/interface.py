@@ -1,14 +1,19 @@
-from abc import ABCMeta
-from abc import abstractmethod
+from abc import (
+    ABCMeta,
+    abstractmethod
+)
+
+import six
 
 NOT_IMPLEMENTED_MESSAGE = "Galaxy tool format does not yet support this tool feature."
 
 
+@six.add_metaclass(ABCMeta)
+@six.python_2_unicode_compatible
 class ToolSource(object):
     """ This interface represents an abstract source to parse tool
     information from.
     """
-    __metaclass__ = ABCMeta
     default_is_multi_byte = False
 
     @abstractmethod
@@ -125,6 +130,16 @@ class ToolSource(object):
         """
         return False
 
+    def parse_sanitize(self):
+        """ Return boolean indicating whether tool should be sanitized or not.
+        """
+        return True
+
+    def parse_refresh(self):
+        """ Return boolean indicating ... I have no clue...
+        """
+        return False
+
     @abstractmethod
     def parse_requirements_and_containers(self):
         """ Return pair of ToolRequirement and ContainerDescription lists. """
@@ -140,6 +155,12 @@ class ToolSource(object):
         """
 
     @abstractmethod
+    def parse_strict_shell(self):
+        """ Return True if tool commands should be executed with
+        set -e.
+        """
+
+    @abstractmethod
     def parse_stdio(self):
         """ Builds lists of ToolStdioExitCode and ToolStdioRegex objects
         to describe tool execution error conditions.
@@ -152,8 +173,21 @@ class ToolSource(object):
         doesn't define help text.
         """
 
+    @abstractmethod
+    def parse_profile(self):
+        """ Return tool profile version as Galaxy major e.g. 16.01 or 16.04.
+        """
+
     def parse_tests_to_dict(self):
         return {'tests': []}
+
+    def __str__(self):
+        source_path = getattr(self, "_soure_path", None)
+        if source_path:
+            as_str = u'%s[%s]' % (self.__class__.__name__, source_path)
+        else:
+            as_str = u'%s[In-memory]' % (self.__class__.__name__)
+        return as_str
 
 
 class PagesSource(object):
@@ -170,8 +204,8 @@ class PagesSource(object):
         return True
 
 
+@six.add_metaclass(ABCMeta)
 class PageSource(object):
-    __metaclass__ = ABCMeta
 
     def parse_display(self):
         return None
@@ -181,8 +215,8 @@ class PageSource(object):
         """ Return a list of InputSource objects. """
 
 
+@six.add_metaclass(ABCMeta)
 class InputSource(object):
-    __metaclass__ = ABCMeta
     default_optional = False
 
     def elem(self):
@@ -315,10 +349,11 @@ class TestCollectionDef( object ):
 
 
 class TestCollectionOutputDef( object ):
-    # TODO: do not require XML directly here.
 
     def __init__( self, name, attrib, element_tests ):
         self.name = name
         self.collection_type = attrib.get( "type", None )
+        count = attrib.get("count", None)
+        self.count = int(count) if count is not None else None
         self.attrib = attrib
         self.element_tests = element_tests

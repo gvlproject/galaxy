@@ -1,13 +1,12 @@
-import os
 import argparse
 import ConfigParser
+import os
 import sys
-new_path = [ os.path.join( os.getcwd(), "lib" ) ]
-new_path.extend( sys.path[1:] )
-sys.path = new_path
 
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import scoped_session, sessionmaker
+
+sys.path.insert(1, os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, 'lib')))
 
 import galaxy.model.tool_shed_install.mapping as mapping
 
@@ -45,6 +44,7 @@ def create_database( config_file ):
     install_session = scoped_session( sessionmaker( bind=engine, autoflush=False, autocommit=True ) )
     model = mapping.init( database_connection )
     return install_session, model
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

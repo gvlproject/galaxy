@@ -9,7 +9,7 @@ from paste.httpexceptions import HTTPNotFound, HTTPBadGateway
 
 from galaxy import web
 from galaxy import util
-from galaxy.util import listify, Params, string_as_bool
+from galaxy.util import listify, Params, string_as_bool, FILENAME_VALID_CHARS
 
 from galaxy.web.base import controller
 from galaxy.model.item_attrs import UsesAnnotations
@@ -31,24 +31,33 @@ class RootController( controller.JSAppLauncher, UsesAnnotations ):
 
     @web.expose
     def default(self, trans, target1=None, target2=None, **kwd):
-        """Called on any url that does not match a controller method.
+        """
+        Called on any url that does not match a controller method.
         """
         raise HTTPNotFound( 'This link may not be followed from within Galaxy.' )
 
+    @web.expose
+    def client(self, trans, **kwd):
+        """
+        Endpoint for clientside routes.  Currently a passthrough to index
+        (minus kwargs) though we can differentiate it more in the future.
+        Should not be used with url_for -- see
+        (https://github.com/galaxyproject/galaxy/issues/1878) for why.
+        """
+        return self.index(trans)
+
     def _get_extended_config( self, trans ):
         app = trans.app
-        configured_for_inactivity_warning = app.config.user_activation_on and app.config.inactivity_box_content is not None
         user_requests = bool( trans.user and ( trans.user.requests or app.security_agent.get_accessible_request_types( trans, trans.user ) ) )
         config = {
             'active_view'                   : 'analysis',
             'params'                        : dict( trans.request.params ),
             'enable_cloud_launch'           : app.config.get_bool( 'enable_cloud_launch', False ),
-            'search_url'                    : web.url_for( controller='root', action='tool_search' ),
             # TODO: next two should be redundant - why can't we build one from the other?
             'toolbox'                       : app.toolbox.to_dict( trans, in_panel=False ),
             'toolbox_in_panel'              : app.toolbox.to_dict( trans ),
             'message_box_visible'           : app.config.message_box_visible,
-            'show_inactivity_warning'       : configured_for_inactivity_warning and trans.user and not trans.user.active,
+            'show_inactivity_warning'       : app.config.user_activation_on and trans.user and not trans.user.active,
             # TODO: move to user
             'user_requests'                 : user_requests
         }
@@ -57,9 +66,9 @@ class RootController( controller.JSAppLauncher, UsesAnnotations ):
         stored_workflow_menu_entries = config[ 'stored_workflow_menu_entries' ] = []
         for menu_item in getattr( trans.user, 'stored_workflow_menu_entries', [] ):
             stored_workflow_menu_entries.append({
-                'encoded_stored_workflow_id' : trans.security.encode_id( menu_item.stored_workflow_id ),
-                'stored_workflow' : {
-                    'name' : util.unicodify( menu_item.stored_workflow.name )
+                'encoded_stored_workflow_id': trans.security.encode_id( menu_item.stored_workflow_id ),
+                'stored_workflow': {
+                    'name': util.unicodify( menu_item.stored_workflow.name )
                 }
             })
 
@@ -110,12 +119,12 @@ class RootController( controller.JSAppLauncher, UsesAnnotations ):
         User login path for client-side.
         """
         return self.template( trans, 'login',
-            redirect=redirect,
-            # TODO: move into config
-            openid_providers=[ p.name for p in trans.app.openid_providers ],
-            # an installation may have it's own welcome_url - show it here if they've set that
-            welcome_url=web.url_for( controller='root', action='welcome' ),
-            show_welcome_with_login=trans.app.config.show_welcome_with_login )
+                              redirect=redirect,
+                              # TODO: move into config
+                              openid_providers=[ p.name for p in trans.app.openid_providers ],
+                              # an installation may have it's own welcome_url - show it here if they've set that
+                              welcome_url=web.url_for( controller='root', action='welcome' ),
+                              show_welcome_with_login=trans.app.config.show_welcome_with_login )
 
     # ---- Tool related -----------------------------------------------------
 
@@ -128,7 +137,7 @@ class RootController( controller.JSAppLauncher, UsesAnnotations ):
         """
         query = kwd.get( 'query', '' )
         tags = listify( kwd.get( 'tags[]', [] ) )
-        trans.log_action( trans.get_user(), "tool_search.search", "", { "query" : query, "tags" : tags } )
+        trans.log_action( trans.get_user(), "tool_search.search", "", { "query": query, "tags": tags } )
         results = []
         if tags:
             tags = trans.sa_session.query( trans.app.model.Tag ).filter( trans.app.model.Tag.name.in_( tags ) ).all()
@@ -207,9 +216,8 @@ class RootController( controller.JSAppLauncher, UsesAnnotations ):
                     trans.response.headers['Content-Length'] = int(fStat.st_size)
                     if toext[0:1] != ".":
                         toext = "." + toext
-                    valid_chars = '.,^_-()[]0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
                     fname = data.name
-                    fname = ''.join(c in valid_chars and c or '_' for c in fname)[0:150]
+                    fname = ''.join(c in FILENAME_VALID_CHARS and c or '_' for c in fname)[0:150]
                     trans.response.headers["Content-Disposition"] = 'attachment; filename="GalaxyHistoryItem-%s-[%s]%s"' % (data.hid, fname, toext)
                 trans.log_event( "Display dataset id: %s" % str(id) )
                 try:
@@ -329,7 +337,7 @@ class RootController( controller.JSAppLauncher, UsesAnnotations ):
             trans.sa_session.flush()
             if not user_history.datasets:
                 trans.set_history( new_history )
-            trans.log_event( "History imported, id: %s, name: '%s': " % (str(new_history.id) , new_history.name ) )
+            trans.log_event( "History imported, id: %s, name: '%s': " % (str(new_history.id), new_history.name ) )
             return trans.show_ok_message( """
                 History "%s" has been imported. Click <a href="%s">here</a>
                 to begin.""" % ( new_history.name, web.url_for( '/' ) ) )
@@ -348,7 +356,7 @@ class RootController( controller.JSAppLauncher, UsesAnnotations ):
             trans.sa_session.add( new_history )
             trans.sa_session.flush()
             trans.set_history( new_history )
-            trans.log_event( "History imported, id: %s, name: '%s': " % (str(new_history.id) , new_history.name ) )
+            trans.log_event( "History imported, id: %s, name: '%s': " % (str(new_history.id), new_history.name ) )
             return trans.show_ok_message( """
                 History "%s" has been imported. Click <a href="%s">here</a>
                 to begin.""" % ( new_history.name, web.url_for( '/' ) ) )
@@ -403,7 +411,7 @@ class RootController( controller.JSAppLauncher, UsesAnnotations ):
             trans.sa_session.flush()
             trans.log_event("Added dataset %d to history %d" % (data.id, trans.history.id))
             return trans.show_ok_message( "Dataset " + str(data.hid) + " added to history " + str(history_id) + "." )
-        except Exception, e:
+        except Exception as e:
             msg = "Failed to add dataset to history: %s" % ( e )
             log.error( msg )
             trans.log_event( msg )

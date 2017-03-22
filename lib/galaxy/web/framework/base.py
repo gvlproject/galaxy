@@ -1,27 +1,29 @@
 """
 A simple WSGI application/framework.
 """
-
 import cgi  # For FieldStorage
 import logging
 import os.path
 import socket
 import tarfile
+import tempfile
+import time
 import types
 
 import routes
 import webob
-
-from six import string_types
-from Cookie import SimpleCookie
-
 # We will use some very basic HTTP/wsgi utilities from the paste library
-from paste.request import get_cookies
 from paste import httpexceptions
+from paste.request import get_cookies
 from paste.response import HeaderDict
+from six.moves.http_cookies import SimpleCookie
 
+from galaxy.util import smart_str
 
 log = logging.getLogger( __name__ )
+
+#: time of the most recent server startup
+server_starttime = int( time.time() )
 
 
 def __resource_with_deleted( self, member_name, collection_name, **kwargs ):
@@ -37,6 +39,8 @@ def __resource_with_deleted( self, member_name, collection_name, **kwargs ):
     self.connect( 'undelete_deleted_' + member_name, member_path + '/undelete', controller=collection_name, action='undelete',
                   conditions=dict( method=['POST'] ) )
     self.resource( member_name, collection_name, **kwargs )
+
+
 routes.Mapper.resource_with_deleted = __resource_with_deleted
 
 
@@ -58,10 +62,10 @@ class WebApplication( object ):
         self.controllers = dict()
         self.api_controllers = dict()
         self.mapper = routes.Mapper()
+        self.clientside_routes = routes.Mapper(controller_scan=None, register=False)
         # FIXME: The following two options are deprecated and should be
         # removed.  Consult the Routes documentation.
         self.mapper.minimization = True
-        # self.mapper.explicit = False
         self.transaction_factory = DefaultWebTransaction
         # Set if trace logging is enabled
         self.trace_logger = None
@@ -93,6 +97,9 @@ class WebApplication( object ):
         """
         self.mapper.connect( route, **kwargs )
 
+    def add_client_route( self, route ):
+        self.clientside_routes.connect( route, controller='root', action='client' )
+
     def set_transaction_factory( self, transaction_factory ):
         """
         Use the callable `transaction_factory` to create the transaction
@@ -106,7 +113,8 @@ class WebApplication( object ):
         requests
         """
         # Create/compile the regular expressions for route mapping
-        self.mapper.create_regs( self.controllers.keys() )
+        self.mapper.create_regs( list(self.controllers.keys()) )
+        self.clientside_routes.create_regs()
 
     def trace( self, **fields ):
         if self.trace_logger:
@@ -130,43 +138,23 @@ class WebApplication( object ):
             if self.trace_logger:
                 self.trace_logger.context_remove( "request_id" )
 
-    def handle_request( self, environ, start_response ):
-        # Grab the request_id (should have been set by middleware)
-        request_id = environ.get( 'request_id', 'unknown' )
-        # Map url using routes
-        path_info = environ.get( 'PATH_INFO', '' )
-        map = self.mapper.match( path_info, environ )
-        if path_info.startswith('/api'):
-            environ[ 'is_api_request' ] = True
-            controllers = self.api_controllers
-        else:
-            environ[ 'is_api_request' ] = False
-            controllers = self.controllers
-        if map is None:
-            raise httpexceptions.HTTPNotFound( "No route for " + path_info )
-        self.trace( path_info=path_info, map=map )
-        # Setup routes
-        rc = routes.request_config()
-        rc.mapper = self.mapper
-        rc.mapper_dict = map
-        rc.environ = environ
-        # Setup the transaction
-        trans = self.transaction_factory( environ )
-        trans.request_id = request_id
-        rc.redirect = trans.response.send_redirect
+    def _resolve_map_match( self, map_match, path_info, controllers, use_default=True):
         # Get the controller class
-        controller_name = map.pop( 'controller', None )
+        controller_name = map_match.pop( 'controller', None )
         controller = controllers.get( controller_name, None )
-        if controller_name is None:
+        if controller is None:
             raise httpexceptions.HTTPNotFound( "No controller for " + path_info )
         # Resolve action method on controller
-        action = map.pop( 'action', 'index' )
         # This is the easiest way to make the controller/action accessible for
         # url_for invocations.  Specifically, grids.
-        trans.controller = controller_name
-        trans.action = action
+        action = map_match.pop( 'action', 'index' )
         method = getattr( controller, action, None )
+        if method is None and not use_default:
+            # Skip default, we do this, for example, when we want to fail
+            # through to another mapper.
+            raise httpexceptions.HTTPNotFound( "No action for " + path_info )
         if method is None:
+            # no matching method, we try for a default
             method = getattr( controller, 'default', None )
         if method is None:
             raise httpexceptions.HTTPNotFound( "No action for " + path_info )
@@ -176,17 +164,62 @@ class WebApplication( object ):
         # Is the method callable
         if not callable( method ):
             raise httpexceptions.HTTPNotFound( "Action not callable for " + path_info )
+        return ( controller_name, controller, action, method )
+
+    def handle_request( self, environ, start_response, body_renderer=None ):
+        # Grab the request_id (should have been set by middleware)
+        request_id = environ.get( 'request_id', 'unknown' )
+        # Map url using routes
+        path_info = environ.get( 'PATH_INFO', '' )
+        client_match = self.clientside_routes.match( path_info, environ )
+        map_match = self.mapper.match( path_info, environ ) or client_match
+        if path_info.startswith('/api'):
+            environ[ 'is_api_request' ] = True
+            controllers = self.api_controllers
+        else:
+            environ[ 'is_api_request' ] = False
+            controllers = self.controllers
+        if map_match is None:
+            raise httpexceptions.HTTPNotFound( "No route for " + path_info )
+        self.trace( path_info=path_info, map_match=map_match )
+        # Setup routes
+        rc = routes.request_config()
+        rc.mapper = self.mapper
+        rc.mapper_dict = map_match
+        rc.environ = environ
+        # Setup the transaction
+        trans = self.transaction_factory( environ )
+        trans.request_id = request_id
+        rc.redirect = trans.response.send_redirect
+        # Resolve mapping to controller/method
+        try:
+            # We don't use default methods if there's a clientside match for this route.
+            use_default = client_match is None
+            controller_name, controller, action, method = self._resolve_map_match( map_match, path_info, controllers, use_default=use_default)
+        except httpexceptions.HTTPNotFound:
+            # Failed, let's check client routes
+            if not environ[ 'is_api_request' ]:
+                controller_name, controller, action, method = self._resolve_map_match( client_match, path_info, controllers )
+            else:
+                raise
+        trans.controller = controller_name
+        trans.action = action
+        environ['controller_action_key'] = "%s.%s.%s" % ('api' if environ['is_api_request'] else 'web', controller_name, action or 'default')
         # Combine mapper args and query string / form args and call
         kwargs = trans.request.params.mixed()
-        kwargs.update( map )
+        kwargs.update( map_match )
         # Special key for AJAX debugging, remove to avoid confusing methods
         kwargs.pop( '_', None )
         try:
             body = method( trans, **kwargs )
-        except Exception, e:
+        except Exception as e:
             body = self.handle_controller_exception( e, trans, **kwargs )
             if not body:
                 raise
+        body_renderer = body_renderer or self._render_body
+        return body_renderer( trans, body, environ, start_response )
+
+    def _render_body( self, trans, body, environ, start_response ):
         # Now figure out what we got back and try to get it to the browser in
         # a smart way
         if callable( body ):
@@ -210,15 +243,12 @@ class WebApplication( object ):
         if isinstance( body, ( types.GeneratorType, list, tuple ) ):
             # Recursively stream the iterable
             return flatten( body )
-        elif isinstance( body, string_types ):
-            # Wrap the string so it can be iterated
-            return [ body ]
         elif body is None:
             # Returns an empty body
             return []
         else:
             # Worst case scenario
-            return [ str( body ) ]
+            return [ smart_str( body ) ]
 
     def handle_controller_exception( self, e, trans, **kwargs ):
         """
@@ -255,8 +285,10 @@ class LazyProperty( object ):
         if obj is None:
             return self
         value = self.func( obj )
-        setattr( obj, self.func.func_name, value )
+        setattr( obj, self.func.__name__, value )
         return value
+
+
 lazy_property = LazyProperty
 
 
@@ -285,15 +317,13 @@ class DefaultWebTransaction( object ):
         else:
             return None
 
-# For request.params, override cgi.FieldStorage.make_file to create persistent
-# tempfiles.  Necessary for externalizing the upload tool.  It's a little hacky
-# but for performance reasons it's way better to use Paste's tempfile than to
-# create a new one and copy.
-import tempfile
-
 
 class FieldStorage( cgi.FieldStorage ):
     def make_file(self, binary=None):
+        # For request.params, override cgi.FieldStorage.make_file to create persistent
+        # tempfiles.  Necessary for externalizing the upload tool.  It's a little hacky
+        # but for performance reasons it's way better to use Paste's tempfile than to
+        # create a new one and copy.
         return tempfile.NamedTemporaryFile()
 
     def read_lines(self):
@@ -304,6 +334,8 @@ class FieldStorage( cgi.FieldStorage ):
             self.read_lines_to_outerboundary()
         else:
             self.read_lines_to_eof()
+
+
 cgi.FieldStorage = FieldStorage
 
 
@@ -382,14 +414,14 @@ class Response( object ):
         self.headers = HeaderDict( { "content-type": "text/html" } )
         self.cookies = SimpleCookie()
 
-    def set_content_type( self, type ):
+    def set_content_type( self, type_ ):
         """
         Sets the Content-Type header
         """
-        self.headers[ "content-type" ] = type
+        self.headers[ "content-type" ] = type_
 
     def get_content_type( self ):
-        return self.headers[ "content-type" ]
+        return self.headers.get("content-type", None)
 
     def send_redirect( self, url ):
         """
@@ -403,8 +435,7 @@ class Response( object ):
         """
         result = self.headers.headeritems()
         # Add cookie to header
-        for name in self.cookies.keys():
-            crumb = self.cookies[name]
+        for name, crumb in self.cookies.items():
             header, value = str( crumb ).split( ': ', 1 )
             result.append( ( header, value ) )
         return result
@@ -418,6 +449,7 @@ class Response( object ):
             return "%d %s" % ( exception.code, exception.title )
         else:
             return self.status
+
 
 # ---- Utilities ------------------------------------------------------------
 
@@ -461,6 +493,6 @@ def flatten( seq ):
     for x in seq:
         if isinstance( x, ( types.GeneratorType, list, tuple ) ):
             for y in flatten( x ):
-                yield y
+                yield smart_str( y )
         else:
-            yield x
+            yield smart_str( x )

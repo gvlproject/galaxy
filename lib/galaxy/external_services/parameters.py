@@ -21,7 +21,7 @@ class ExternalServiceParameter( object ):
         self.parent = parent
 
     def get_value( self, param_dict ):
-        raise 'Abstract Method'
+        raise Exception( 'Abstract Method' )
 
 
 class ExternalServiceTemplateParameter( ExternalServiceParameter ):
@@ -39,5 +39,6 @@ class ExternalServiceTemplateParameter( ExternalServiceParameter ):
         if self.strip:
             value = value.strip()
         return value
+
 
 parameter_type_to_class = { ExternalServiceTemplateParameter.type: ExternalServiceTemplateParameter }

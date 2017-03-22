@@ -1,6 +1,8 @@
 """
 Migration script to create tables for disk quotas.
 """
+from __future__ import print_function
+
 import datetime
 import logging
 
@@ -46,32 +48,32 @@ DefaultQuotaAssociation_table = Table( "default_quota_association", metadata,
 
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    print __doc__
+    print(__doc__)
     metadata.reflect()
 
     # Create quota table
     try:
         Quota_table.create()
-    except Exception, e:
-        log.debug( "Creating quota table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating quota table failed.")
 
     # Create user_quota_association table
     try:
         UserQuotaAssociation_table.create()
-    except Exception, e:
-        log.debug( "Creating user_quota_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating user_quota_association table failed.")
 
     # Create group_quota_association table
     try:
         GroupQuotaAssociation_table.create()
-    except Exception, e:
-        log.debug( "Creating group_quota_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating group_quota_association table failed.")
 
     # Create default_quota_association table
     try:
         DefaultQuotaAssociation_table.create()
-    except Exception, e:
-        log.debug( "Creating default_quota_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating default_quota_association table failed.")
 
 
 def downgrade(migrate_engine):
@@ -81,23 +83,23 @@ def downgrade(migrate_engine):
     # Drop default_quota_association table
     try:
         DefaultQuotaAssociation_table.drop()
-    except Exception, e:
-        log.debug( "Dropping default_quota_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping default_quota_association table failed.")
 
     # Drop group_quota_association table
     try:
         GroupQuotaAssociation_table.drop()
-    except Exception, e:
-        log.debug( "Dropping group_quota_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping group_quota_association table failed.")
 
     # Drop user_quota_association table
     try:
         UserQuotaAssociation_table.drop()
-    except Exception, e:
-        log.debug( "Dropping user_quota_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping user_quota_association table failed.")
 
     # Drop quota table
     try:
         Quota_table.drop()
-    except Exception, e:
-        log.debug( "Dropping quota table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping quota table failed.")

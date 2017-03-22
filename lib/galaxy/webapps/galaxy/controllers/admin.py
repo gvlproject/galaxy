@@ -10,8 +10,7 @@ from galaxy import web
 from galaxy.actions.admin import AdminActions
 from galaxy.exceptions import MessageException
 from galaxy.model import tool_shed_install as install_model
-from galaxy.model.util import pgcalc
-from galaxy.util import nice_size, sanitize_text
+from galaxy.util import nice_size, sanitize_text, url_get
 from galaxy.util.odict import odict
 from galaxy.web import url_for
 from galaxy.web.base.controller import BaseUIController, UsesQuotaMixin
@@ -92,7 +91,8 @@ class UserListGrid( grids.Grid ):
                      model_class=model.User,
                      link=( lambda item: dict( operation="information", id=item.id, webapp="galaxy" ) ),
                      attach_popup=True,
-                     filterable="advanced" ),
+                     filterable="advanced",
+                     target="top" ),
         UserNameColumn( "User Name",
                         key="username",
                         model_class=model.User,
@@ -445,7 +445,7 @@ class ToolVersionListGrid( grids.Grid ):
             toolbox = trans.app.toolbox
             if toolbox.has_tool( tool_version.tool_id, exact=True ):
                 link = url_for( controller='tool_runner', tool_id=tool_version.tool_id )
-                link_str = '<a href="%s">' % link
+                link_str = '<a target="_blank" href="%s">' % link
                 return '<div class="count-box state-color-ok">%s%s</a></div>' % ( link_str, tool_version.tool_id )
             return tool_version.tool_id
 
@@ -455,8 +455,8 @@ class ToolVersionListGrid( grids.Grid ):
             toolbox = trans.app.toolbox
             for tool_id in tool_version.get_version_ids( trans.app ):
                 if toolbox.has_tool( tool_id, exact=True ):
-                    link = url_for( controller='tool_runner', tool_id=tool_version.tool_id )
-                    link_str = '<a href="%s">' % link
+                    link = url_for( controller='tool_runner', tool_id=tool_id )
+                    link_str = '<a target="_blank" href="%s">' % link
                     tool_ids_str += '<div class="count-box state-color-ok">%s%s</a></div><br/>' % ( link_str, tool_id )
                 else:
                     tool_ids_str += '%s<br/>' % tool_id
@@ -539,7 +539,7 @@ class AdminGalaxy( BaseUIController, Admin, AdminActions, UsesQuotaMixin, QuotaP
                                                                   webapp=params.webapp,
                                                                   message=sanitize_text( message ),
                                                                   status='done' ) )
-            except MessageException, e:
+            except MessageException as e:
                 params.message = str( e )
                 params.status = 'error'
         in_users = map( int, params.in_users )
@@ -712,7 +712,7 @@ class AdminGalaxy( BaseUIController, Admin, AdminActions, UsesQuotaMixin, QuotaP
             for id in galaxy.util.listify( params.id ):
                 try:
                     quota.append( self.get_quota( trans, id ) )
-                except MessageException, e:
+                except MessageException as e:
                     messages.append( str( e ) )
             if messages:
                 return None, trans.response.send_redirect( web.url_for( controller='admin',
@@ -723,7 +723,7 @@ class AdminGalaxy( BaseUIController, Admin, AdminActions, UsesQuotaMixin, QuotaP
         else:
             try:
                 quota = self.get_quota( trans, params.id, deleted=False )
-            except MessageException, e:
+            except MessageException as e:
                 return None, trans.response.send_redirect( web.url_for( controller='admin',
                                                                         action='quotas',
                                                                         webapp=params.webapp,
@@ -737,7 +737,7 @@ class AdminGalaxy( BaseUIController, Admin, AdminActions, UsesQuotaMixin, QuotaP
                                                                         webapp=params.webapp,
                                                                         message=sanitize_text( message ),
                                                                         status='done' ) )
-            except MessageException, e:
+            except MessageException as e:
                 params.message = e.err_msg
                 params.status = e.type
         return quota, params
@@ -770,9 +770,9 @@ class AdminGalaxy( BaseUIController, Admin, AdminActions, UsesQuotaMixin, QuotaP
         tree = galaxy.util.parse_xml( tools_xml_file_path )
         root = tree.getroot()
         tool_shed = root.get( 'name' )
-        tool_shed_url = common_util.get_tool_shed_url_from_tool_shed_registry( trans.app, tool_shed )
+        shed_url = common_util.get_tool_shed_url_from_tool_shed_registry( trans.app, tool_shed )
         repo_name_dependency_tups = []
-        if tool_shed_url:
+        if shed_url:
             for elem in root:
                 if elem.tag == 'repository':
                     tool_dependencies = []
@@ -781,7 +781,7 @@ class AdminGalaxy( BaseUIController, Admin, AdminActions, UsesQuotaMixin, QuotaP
                     changeset_revision = elem.get( 'changeset_revision' )
                     params = dict( name=repository_name, owner='devteam', changeset_revision=changeset_revision )
                     pathspec = [ 'repository', 'get_tool_dependencies' ]
-                    text = common_util.tool_shed_get( trans.app, tool_shed_url, pathspec=pathspec, params=params )
+                    text = url_get( shed_url, password_mgr=self.app.tool_shed_registry.url_auth( shed_url ), pathspec=pathspec, params=params )
                     if text:
                         tool_dependencies_dict = encoding_util.tool_shed_decode( text )
                         for dependency_key, requirements_dict in tool_dependencies_dict.items():
@@ -874,27 +874,9 @@ class AdminGalaxy( BaseUIController, Admin, AdminActions, UsesQuotaMixin, QuotaP
         user = trans.sa_session.query( trans.model.User ).get( trans.security.decode_id( user_id ) )
         if not user:
             return trans.show_error_message( "User not found for id (%s)" % sanitize_text( str( user_id ) ) )
-        engine = None
-        if trans.app.config.database_connection:
-            engine = trans.app.config.database_connection.split(':')[0]
-        if engine not in ( 'postgres', 'postgresql' ):
-            done = False
-            while not done:
-                current = user.get_disk_usage()
-                new = user.calculate_disk_usage()
-                trans.sa_session.refresh( user )
-                # make sure usage didn't change while calculating, set done
-                if user.get_disk_usage() == current:
-                    done = True
-                if new not in (current, None):
-                    user.set_disk_usage( new )
-                    trans.sa_session.add( user )
-                    trans.sa_session.flush()
-        else:
-            # We can use the lightning fast pgcalc!
-            current = user.get_disk_usage()
-            new = pgcalc( self.sa_session, user.id )
-        # yes, still a small race condition between here and the flush
+        current = user.get_disk_usage()
+        user.calculate_and_set_disk_usage()
+        new = user.get_disk_usage()
         if new in ( current, None ):
             message = 'Usage is unchanged at %s.' % nice_size( current )
         else:

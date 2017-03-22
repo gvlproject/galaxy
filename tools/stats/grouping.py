@@ -4,8 +4,10 @@
 """
 This tool provides the SQL "group by" functionality.
 """
-import commands
+from __future__ import print_function
+
 import random
+import subprocess
 import sys
 import tempfile
 from itertools import groupby
@@ -38,19 +40,20 @@ def main():
     round_val = []
 
     if sys.argv[5] != "None":
-        oldfile = open(inputfile, 'r')
-        oldfilelines = oldfile.readlines()
-        newinputfile = "input_cleaned.tsv"
-        newfile = open(newinputfile, 'w')
-        asciitodelete = sys.argv[5].split(',')
-        for i in range(len(asciitodelete)):
-            asciitodelete[i] = chr(int(asciitodelete[i]))
-        for line in oldfilelines:
-            if line[0] not in asciitodelete:
-                newfile.write(line)
-        oldfile.close()
-        newfile.close()
-        inputfile = newinputfile
+        asciitodelete = sys.argv[5]
+        if asciitodelete:
+            oldfile = open(inputfile, 'r')
+            newinputfile = "input_cleaned.tsv"
+            newfile = open(newinputfile, 'w')
+            asciitodelete = asciitodelete.split(',')
+            for i in range(len(asciitodelete)):
+                asciitodelete[i] = chr(int(asciitodelete[i]))
+            for line in oldfile:
+                if line[0] not in asciitodelete:
+                    newfile.write(line)
+            oldfile.close()
+            newfile.close()
+            inputfile = newinputfile
 
     for var in sys.argv[6:]:
         op, col, do_round = var.split()
@@ -84,13 +87,13 @@ def main():
         if ignorecase == 1:
             case = '-f'
         command_line = "sort -t '	' %s -k%s,%s -o %s %s" % (case, group_col + 1, group_col + 1, tmpfile.name, inputfile)
-    except Exception, exc:
+    except Exception as exc:
         stop_err( 'Initialization error -> %s' % str(exc) )
 
-    error_code, stdout = commands.getstatusoutput(command_line)
-
-    if error_code != 0:
-        stop_err( "Sorting input dataset resulted in error: %s: %s" % ( error_code, stdout ))
+    try:
+        subprocess.check_output(command_line, stderr=subprocess.STDOUT, shell=True)
+    except subprocess.CalledProcessError as e:
+        stop_err( "Sorting input dataset resulted in error: %s: %s" % ( e.returncode, e.output ))
 
     fout = open(sys.argv[1], "w")
 
@@ -138,7 +141,7 @@ def main():
             else:
                 # some kind of numpy fn
                 try:
-                    data = map(float, data)
+                    data = [float(_) for _ in data]
                 except ValueError:
                     sys.stderr.write( "Operation %s expected number values but got %s instead.\n" % (op, data) )
                     sys.exit( 1 )
@@ -167,9 +170,10 @@ def main():
 
         msg += op + "[c" + cols[i] + "] "
 
-    print msg
+    print(msg)
     fout.close()
     tmpfile.close()
+
 
 if __name__ == "__main__":
     main()

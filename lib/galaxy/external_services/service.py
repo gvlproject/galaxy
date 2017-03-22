@@ -148,6 +148,7 @@ class ItemIsInstanceExternalServiceActionsGroupWhen( ExternalServiceActionsGroup
         ref = self.get_ref( param_dict )
         return ref.__class__.__name__.lower() in map( lambda x: x.lower(), self.value.split( '.' ) )  # HACK!
 
+
 when_type_to_class = {}
 for class_type in [ ValueExternalServiceActionsGroupWhen, BooleanExternalServiceActionsGroupWhen, ItemIsInstanceExternalServiceActionsGroupWhen]:
     when_type_to_class[ class_type.type ] = class_type
@@ -218,7 +219,7 @@ class PopulatedExternalService( object ):
             elif isinstance( item, ExternalServiceActionsGroup ):
                 item.prepare_actions( param_dict, param_dict, action_list )
             else:
-                raise 'unknown item type found'
+                raise Exception( 'unknown item type found' )
         self.param_dict = param_dict
         self.actions = action_list
 

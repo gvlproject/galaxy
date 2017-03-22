@@ -31,13 +31,13 @@
 
             <ul class="manage-table-actions">
                 <li>
-                    <a class="action-button" href="${h.url_for( controller='workflow', action='create' )}">
+                    <a class="action-button" id="new-workflow" href="${h.url_for( controller='workflow', action='create' )}">
                         <img src="${h.url_for('/static/images/silk/add.png')}" />
                         <span>Create new workflow</span>
                     </a>
                 </li>
                 <li>
-                    <a class="action-button" href="${h.url_for( controller='workflow', action='import_workflow' )}">
+                    <a class="action-button" id="import-workflow" href="${h.url_for( controller='workflow', action='import_workflow' )}">
                         <img src="${h.url_for('/static/images/fugue/arrow-090.png')}" />
                         <span>Upload or import workflow</span>
                     </a>
@@ -65,8 +65,7 @@
                                 <div popupmenu="wf-${i}-popup">
                                 <a class="action-button" href="${h.url_for( controller='workflow', action='editor', id=trans.security.encode_id( workflow.id ) )}" target="_parent">Edit</a>
                                 <a class="action-button" href="${h.url_for( controller='root', action='index', workflow_id=trans.security.encode_id( workflow.id ) )}" target="_parent">Run</a>
-                                <a class="action-button" href="${h.url_for( controller='workflow', action='sharing', id=trans.security.encode_id( workflow.id ) )}">Share or Publish</a>
-                                <a class="action-button" href="${h.url_for( controller='workflow', action='export', id=trans.security.encode_id( workflow.id ) )}">Download or Export</a>
+                                <a class="action-button" href="${h.url_for( controller='workflow', action='sharing', id=trans.security.encode_id( workflow.id ) )}">Share or Download</a>
                                 <a class="action-button" href="${h.url_for( controller='workflow', action='copy', id=trans.security.encode_id( workflow.id ) )}">Copy</a>
                                 <a class="action-button" href="${h.url_for( controller='workflow', action='rename', id=trans.security.encode_id( workflow.id ) )}">Rename</a>
                                 <a class="action-button" href="${h.url_for( controller='workflow', action='display_by_id', id=trans.security.encode_id( workflow.id ) )}" target="_top">View</a>

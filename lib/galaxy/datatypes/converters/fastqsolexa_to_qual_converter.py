@@ -32,7 +32,7 @@ def __main__():
     default_coding_value = 64
     fastq_block_lines = 0
 
-    for i, line in enumerate( file( infile_name ) ):
+    for i, line in enumerate( open( infile_name ) ):
         line = line.rstrip()
         if not line or line.startswith( '#' ):
             continue
@@ -92,6 +92,7 @@ def __main__():
             outfile_score.write( '%s\n' % qual )
 
     outfile_score.close()
+
 
 if __name__ == "__main__":
     __main__()

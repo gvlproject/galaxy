@@ -12,9 +12,49 @@ import tempfile
 
 from galaxy.datatypes.data import get_file_peek, Text
 from galaxy.datatypes.metadata import MetadataElement, MetadataParameter
+from galaxy.datatypes.sniff import get_headers
 from galaxy.util import nice_size, string_as_bool
 
 log = logging.getLogger(__name__)
+
+
+class Html( Text ):
+    """Class describing an html file"""
+    edam_format = "format_2331"
+    file_ext = "html"
+
+    def set_peek( self, dataset, is_multi_byte=False ):
+        if not dataset.dataset.purged:
+            dataset.peek = "HTML file"
+            dataset.blurb = nice_size( dataset.get_size() )
+        else:
+            dataset.peek = 'file does not exist'
+            dataset.blurb = 'file purged from disk'
+
+    def get_mime(self):
+        """Returns the mime type of the datatype"""
+        return 'text/html'
+
+    def sniff( self, filename ):
+        """
+        Determines whether the file is in html format
+
+        >>> from galaxy.datatypes.sniff import get_test_fname
+        >>> fname = get_test_fname( 'complete.bed' )
+        >>> Html().sniff( fname )
+        False
+        >>> fname = get_test_fname( 'file.html' )
+        >>> Html().sniff( fname )
+        True
+        """
+        headers = get_headers( filename, None )
+        try:
+            for i, hdr in enumerate(headers):
+                if hdr and hdr[0].lower().find( '<html>' ) >= 0:
+                    return True
+            return False
+        except:
+            return True
 
 
 class Json( Text ):
@@ -68,7 +108,7 @@ class Ipynb( Json ):
     def set_peek( self, dataset, is_multi_byte=False ):
         if not dataset.dataset.purged:
             dataset.peek = get_file_peek( dataset.file_name, is_multi_byte=is_multi_byte )
-            dataset.blurb = "IPython Notebook"
+            dataset.blurb = "Jupyter Notebook"
         else:
             dataset.peek = 'file does not exist'
             dataset.blurb = 'file purged from disc'
@@ -87,32 +127,30 @@ class Ipynb( Json ):
             except:
                 return False
 
-    def display_data(self, trans, dataset, preview=False, filename=None, to_ext=None, chunk=None, **kwd):
+    def display_data(self, trans, dataset, preview=False, filename=None, to_ext=None, **kwd):
         config = trans.app.config
-        trust = getattr( config, 'trust_ipython_notebook_conversion', False )
+        trust = getattr( config, 'trust_jupyter_notebook_conversion', False )
         if trust:
-            return self._display_data_trusted(trans, dataset, preview=preview, filename=filename, to_ext=to_ext, chunk=chunk, **kwd)
+            return self._display_data_trusted(trans, dataset, preview=preview, filename=filename, to_ext=to_ext, **kwd)
         else:
-            return super(Ipynb, self).display_data( trans, dataset, preview=preview, filename=filename, to_ext=to_ext, chunk=chunk, **kwd )
+            return super(Ipynb, self).display_data( trans, dataset, preview=preview, filename=filename, to_ext=to_ext, **kwd )
 
-    def _display_data_trusted(self, trans, dataset, preview=False, filename=None, to_ext=None, chunk=None, **kwd):
+    def _display_data_trusted(self, trans, dataset, preview=False, filename=None, to_ext=None, **kwd):
         preview = string_as_bool( preview )
-        if chunk:
-            return self.get_chunk(trans, dataset, chunk)
-        elif to_ext or not preview:
+        if to_ext or not preview:
             return self._serve_raw(trans, dataset, to_ext)
         else:
             ofile_handle = tempfile.NamedTemporaryFile(delete=False)
             ofilename = ofile_handle.name
             ofile_handle.close()
             try:
-                cmd = 'ipython nbconvert --to html --template full %s --output %s' % (dataset.file_name, ofilename)
+                cmd = 'jupyter nbconvert --to html --template full %s --output %s' % (dataset.file_name, ofilename)
                 log.info("Calling command %s" % cmd)
                 subprocess.call(cmd, shell=True)
                 ofilename = '%s.html' % ofilename
             except:
                 ofilename = dataset.file_name
-                log.exception( 'Command "%s" failed. Could not convert the IPython Notebook to HTML, defaulting to plain text.' % cmd )
+                log.exception( 'Command "%s" failed. Could not convert the Jupyter Notebook to HTML, defaulting to plain text.' % cmd )
             return open( ofilename )
 
     def set_meta( self, dataset, **kwd ):
@@ -220,6 +258,7 @@ class Obo( Text ):
         OBO file format description
         http://www.geneontology.org/GO.format.obo-1_2.shtml
     """
+    edam_data = "data_0582"
     edam_format = "format_2549"
     file_ext = "obo"
 
@@ -255,6 +294,7 @@ class Arff( Text ):
         An ARFF (Attribute-Relation File Format) file is an ASCII text file that describes a list of instances sharing a set of attributes.
         http://weka.wikispaces.com/ARFF
     """
+    edam_format = "format_3581"
     file_ext = "arff"
 
     """Add metadata elements"""
@@ -353,6 +393,7 @@ class Arff( Text ):
 
 class SnpEffDb( Text ):
     """Class describing a SnpEff genome build"""
+    edam_format = "format_3624"
     file_ext = "snpeffdb"
     MetadataElement( name="genome_version", default=None, desc="Genome Version", readonly=True, visible=True, no_value=None )
     MetadataElement( name="snpeff_version", default="SnpEff4.0", desc="SnpEff Version", readonly=True, visible=True, no_value=None )
@@ -383,7 +424,7 @@ class SnpEffDb( Text ):
         # search data_dir/genome_version for files
         regulation_pattern = 'regulation_(.+).bin'
         #  annotation files that are included in snpEff by a flag
-        annotations_dict = {'nextProt.bin' : '-nextprot', 'motif.bin': '-motif'}
+        annotations_dict = {'nextProt.bin': '-nextprot', 'motif.bin': '-motif'}
         regulations = []
         annotations = []
         genome_version = None
@@ -411,21 +452,20 @@ class SnpEffDb( Text ):
             dataset.metadata.regulation = regulations
             dataset.metadata.annotation = annotations
             try:
-                fh = file(dataset.file_name, 'w')
-                fh.write("%s\n" % genome_version if genome_version else 'Genome unknown')
-                fh.write("%s\n" % snpeff_version if snpeff_version else 'SnpEff version unknown')
-                if annotations:
-                    fh.write("annotations: %s\n" % ','.join(annotations))
-                if regulations:
-                    fh.write("regulations: %s\n" % ','.join(regulations))
-                fh.close()
+                with open(dataset.file_name, 'w') as fh:
+                    fh.write("%s\n" % genome_version if genome_version else 'Genome unknown')
+                    fh.write("%s\n" % snpeff_version if snpeff_version else 'SnpEff version unknown')
+                    if annotations:
+                        fh.write("annotations: %s\n" % ','.join(annotations))
+                    if regulations:
+                        fh.write("regulations: %s\n" % ','.join(regulations))
             except:
                 pass
 
 
 class SnpSiftDbNSFP( Text ):
     """Class describing a dbNSFP database prepared fpr use by SnpSift dbnsfp """
-    MetadataElement( name='reference_name', default='dbSNFP' , desc='Reference Name', readonly=True, visible=True, set_in_upload=True, no_value='dbSNFP' )
+    MetadataElement( name='reference_name', default='dbSNFP', desc='Reference Name', readonly=True, visible=True, set_in_upload=True, no_value='dbSNFP' )
     MetadataElement( name="bgzip", default=None, desc="dbNSFP bgzip", readonly=True, visible=True, no_value=None )
     MetadataElement( name="index", default=None, desc="Tabix Index File", readonly=True, visible=True, no_value=None)
     MetadataElement( name="annotation", default=[], desc="Annotation Names", readonly=True, visible=True, no_value=[] )
@@ -486,14 +526,14 @@ class SnpSiftDbNSFP( Text ):
                             headers = lines[0].split('\t')
                             dataset.metadata.annotation = headers[4:]
                         except Exception as e:
-                            log.warn("set_meta fname: %s  %s" % (fname, str(e)))
+                            log.warning("set_meta fname: %s  %s" % (fname, str(e)))
                         finally:
                             fh.close()
                     if fname.endswith('.tbi'):
                         dataset.metadata.index = fname
             self.regenerate_primary_file(dataset)
         except Exception as e:
-            log.warn("set_meta fname: %s  %s" % (dataset.file_name if dataset and dataset.file_name else 'Unkwown', str(e)))
+            log.warning("set_meta fname: %s  %s" % (dataset.file_name if dataset and dataset.file_name else 'Unkwown', str(e)))
 
         def set_peek( self, dataset, is_multi_byte=False ):
             if not dataset.dataset.purged:
@@ -502,3 +542,113 @@ class SnpSiftDbNSFP( Text ):
             else:
                 dataset.peek = 'file does not exist'
                 dataset.blurb = 'file purged from disc'
+
+
+class Smat(Text):
+    file_ext = "smat"
+
+    def display_peek(self, dataset):
+        try:
+            return dataset.peek
+        except:
+            return "ESTScan scores matrices (%s)" % (nice_size(dataset.get_size()))
+
+    def set_peek(self, dataset, is_multi_byte=False):
+        if not dataset.dataset.purged:
+            dataset.peek = get_file_peek(dataset.file_name, is_multi_byte=is_multi_byte)
+            dataset.blurb = "ESTScan scores matrices"
+        else:
+            dataset.peek = 'file does not exist'
+            dataset.blurb = 'file purged from disc'
+
+    def sniff(self, filename):
+        """
+        The use of ESTScan implies the creation of scores matrices which
+        reflect the codons preferences in the studied organisms.  The
+        ESTScan package includes scripts for generating these files.  The
+        output of these scripts consists of the matrices, one for each
+        isochor, and which look like this:
+
+        FORMAT: hse_4is.conf CODING REGION 6 3 1 s C+G: 0 44
+        -1 0 2 -2
+        2 1 -8 0
+
+        >>> from galaxy.datatypes.sniff import get_test_fname
+        >>> fname = get_test_fname('test_space.txt')
+        >>> Smat().sniff(fname)
+        False
+        >>> fname = get_test_fname('test_tab.bed')
+        >>> Smat().sniff(fname)
+        False
+        >>> fname = get_test_fname('1.smat')
+        >>> Smat().sniff(fname)
+        True
+        """
+        line_no = 0
+        with open(filename, "r") as fh:
+            line_no += 1
+            if line_no > 10000:
+                return True
+            line = fh.readline(500)
+            if line_no == 1 and not line.startswith('FORMAT'):
+                # The first line is always the start of a format section.
+                return False
+            if not line.startswith('FORMAT'):
+                if line.find('\t') >= 0:
+                    # Smat files are not tabular.
+                    return False
+                items = line.split()
+                if len(items) != 4:
+                    return False
+                for item in items:
+                    # Make sure each item is an integer.
+                    if re.match(r"[-+]?\d+$", item) is None:
+                        return False
+        return True
+
+
+class PlantTribesOrtho(Html):
+    """
+    PlantTribes sequences classified into precomputed, orthologous gene family
+    clusters.
+    """
+    file_ext = "ptortho"
+
+    def set_peek(self, dataset, is_multi_byte=False):
+        super(PlantTribesOrtho, self).set_peek(dataset, is_multi_byte=is_multi_byte)
+        dataset.blurb = "PlantTribes gene family clusters: %d files" % dataset.metadata.data_lines
+
+
+class PlantTribesOrthoCodingSequence(Html):
+    """
+    PlantTribes sequences classified into precomputed, orthologous gene family
+    clusters and corresponding coding sequences.
+    """
+    file_ext = "ptorthocs"
+
+    def set_peek(self, dataset, is_multi_byte=False):
+        super(PlantTribesOrthoCodingSequence, self).set_peek(dataset, is_multi_byte=is_multi_byte)
+        dataset.blurb = "PlantTribes gene family clusters with corresponding coding sequences: %d files" % dataset.metadata.data_lines
+
+
+class PlantTribesPhylogeneticTree(Html):
+    """
+    PlantTribes multiple sequence alignments and inferred maximum likelihood
+    phylogenies for orthogroups.
+    """
+    file_ext = "pttree"
+
+    def set_peek(self, dataset, is_multi_byte=False):
+        super(PlantTribesPhylogeneticTree, self).set_peek(dataset, is_multi_byte=is_multi_byte)
+        dataset.blurb = "PlantTribes phylogenetic trees: %d files" % dataset.metadata.data_lines
+
+
+class PlantTribesMultipleSequenceAlignment(Html):
+    """
+    PlantTribes multiple sequence alignments for orthogroups.
+    """
+    file_ext = "ptalign"
+
+    def set_peek(self, dataset, is_multi_byte=False):
+        super(PlantTribesMultipleSequenceAlignment, self).set_peek(dataset, is_multi_byte=is_multi_byte)
+        dataset.blurb = "PlantTribes multiple sequence alignments: %d files" % dataset.metadata.data_lines

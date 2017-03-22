@@ -27,7 +27,7 @@ def set_user(uid):
         gid = pwd.getpwuid(uid).pw_gid
         os.setgid(gid)
         os.setuid(uid)
-    except OSError, e:
+    except OSError as e:
         if e.errno == errno.EPERM:
             sys.stderr.write("error: setuid(%d) failed: permission denied. Did you setup 'sudo' correctly for this script?\n" % uid )
             exit(1)
@@ -48,6 +48,7 @@ def main():
     s.initialize()
     s.control(jobID, drmaa.JobControlAction.TERMINATE)
     s.exit()
+
 
 if __name__ == "__main__":
     main()

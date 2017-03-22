@@ -3,16 +3,16 @@ Migration script to add 'name' attribute to the JSON dict which describes
 a form definition field and the form values in the database. In the 'form_values'
 table, the 'content' column is now a JSON dict instead of a list.
 """
-import datetime
+from __future__ import print_function
+
 import logging
 import sys
-from json import loads, dumps
+from json import dumps, loads
 
 from sqlalchemy import MetaData, Table
 
 from galaxy.model.custom_types import _sniffnfix_pg9_hex
 
-now = datetime.datetime.utcnow
 log = logging.getLogger( __name__ )
 log.setLevel(logging.DEBUG)
 handler = logging.StreamHandler( sys.stdout )
@@ -25,16 +25,16 @@ metadata = MetaData()
 
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    print __doc__
+    print(__doc__)
     metadata.reflect()
     try:
         Table( "form_definition", metadata, autoload=True )
-    except Exception, e:
-        log.debug( "Loading 'form_definition' table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Loading 'form_definition' table failed.")
     try:
         Table( "form_values", metadata, autoload=True )
-    except Exception, e:
-        log.debug( "Loading 'form_values' table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Loading 'form_values' table failed.")
 
     def get_value(lst, index):
         try:
@@ -91,12 +91,12 @@ def downgrade(migrate_engine):
     metadata.reflect()
     try:
         Table( "form_definition", metadata, autoload=True )
-    except Exception, e:
-        log.debug( "Loading 'form_definition' table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Loading 'form_definition' table failed.")
     try:
         Table( "form_values", metadata, autoload=True )
-    except Exception, e:
-        log.debug( "Loading 'form_values' table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Loading 'form_values' table failed.")
     # remove the name attribute in the content column JSON dict in the form_values table
     # and restore it to a list of values
     cmd = "SELECT form_values.id, form_values.content, form_definition.fields" \

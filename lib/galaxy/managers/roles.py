@@ -33,7 +33,7 @@ class RoleManager( base.ModelManager ):
         :type   decoded_role_id:      int
 
         :returns:   the loaded Role object
-        :rtype:     Role
+        :rtype:     galaxy.model.Role
 
         :raises: InconsistentDatabase, RequestParameterInvalidException, InternalServerError
         """
@@ -44,6 +44,6 @@ class RoleManager( base.ModelManager ):
             raise galaxy.exceptions.InconsistentDatabase( 'Multiple roles found with the same id.' )
         except sqlalchemy_exceptions.NoResultFound:
             raise galaxy.exceptions.RequestParameterInvalidException( 'No role found with the id provided.' )
-        except Exception, e:
+        except Exception as e:
             raise galaxy.exceptions.InternalServerError( 'Error loading from the database.' + str(e) )
         return role

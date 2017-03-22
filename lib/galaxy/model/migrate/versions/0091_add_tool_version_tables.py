@@ -1,6 +1,8 @@
 """
 Migration script to create the tool_version and tool_version_association tables and drop the tool_id_guid_map table.
 """
+from __future__ import print_function
+
 import datetime
 import logging
 import sys
@@ -40,6 +42,7 @@ def localtimestamp(migrate_engine):
     else:
         raise Exception( 'Unable to convert data for unknown database type: %s' % migrate_engine.name )
 
+
 ToolVersion_table = Table( "tool_version", metadata,
     Column( "id", Integer, primary_key=True ),
     Column( "create_time", DateTime, default=now ),
@@ -55,7 +58,7 @@ ToolVersionAssociation_table = Table( "tool_version_association", metadata,
 
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    print __doc__
+    print(__doc__)
 
     ToolIdGuidMap_table = Table( "tool_id_guid_map", metadata, autoload=True )
 
@@ -63,12 +66,12 @@ def upgrade(migrate_engine):
     # Create the tables.
     try:
         ToolVersion_table.create()
-    except Exception, e:
-        log.debug( "Creating tool_version table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating tool_version table failed.")
     try:
         ToolVersionAssociation_table.create()
-    except Exception, e:
-        log.debug( "Creating tool_version_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating tool_version_association table failed.")
     # Populate the tool table with tools included in installed tool shed repositories.
     cmd = "SELECT id, metadata FROM tool_shed_repository"
     result = migrate_engine.execute( cmd )
@@ -85,12 +88,12 @@ def upgrade(migrate_engine):
                     ( nextval( migrate_engine, 'tool_version' ), localtimestamp( migrate_engine ), localtimestamp( migrate_engine ), tool_dict[ 'guid' ], tool_shed_repository_id )
                 migrate_engine.execute( cmd )
                 count += 1
-    print "Added %d rows to the new tool_version table." % count
+    print("Added %d rows to the new tool_version table." % count)
     # Drop the tool_id_guid_map table since the 2 new tables render it unnecessary.
     try:
         ToolIdGuidMap_table.drop()
-    except Exception, e:
-        log.debug( "Dropping tool_id_guid_map table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping tool_id_guid_map table failed.")
 
 
 def downgrade(migrate_engine):
@@ -110,13 +113,13 @@ def downgrade(migrate_engine):
     metadata.reflect()
     try:
         ToolVersionAssociation_table.drop()
-    except Exception, e:
-        log.debug( "Dropping tool_version_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping tool_version_association table failed.")
     try:
         ToolVersion_table.drop()
-    except Exception, e:
-        log.debug( "Dropping tool_version table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping tool_version table failed.")
     try:
         ToolIdGuidMap_table.create()
-    except Exception, e:
-        log.debug( "Creating tool_id_guid_map table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating tool_id_guid_map table failed.")

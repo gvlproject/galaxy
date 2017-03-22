@@ -1,24 +1,26 @@
-from .interface import ToolSource
-from .interface import PagesSource
-from .interface import PageSource
-from .interface import InputSource
-from .util import error_on_exit_code
 
 from galaxy.tools.deps import requirements
-from .output_collection_def import dataset_collector_descriptions_from_list
-from .output_actions import ToolOutputActionGroup
 from galaxy.util.odict import odict
+
+from .interface import InputSource
+from .interface import PageSource
+from .interface import PagesSource
+from .interface import ToolSource
+from .output_actions import ToolOutputActionGroup
+from .output_collection_def import dataset_collector_descriptions_from_list
 from .output_objects import (
     ToolOutput,
     ToolOutputCollection,
     ToolOutputCollectionStructure,
 )
+from .util import error_on_exit_code
 
 
 class YamlToolSource(ToolSource):
 
-    def __init__(self, root_dict):
+    def __init__(self, root_dict, source_path=None):
         self.root_dict = root_dict
+        self._source_path = source_path
 
     def parse_id(self):
         return self.root_dict.get("id")
@@ -30,10 +32,19 @@ class YamlToolSource(ToolSource):
         return self.root_dict.get("name")
 
     def parse_description(self):
-        return self.root_dict.get("description")
+        return self.root_dict.get("description", "")
+
+    def parse_edam_operations(self):
+        return self.root_dict.get("edam_operations", [])
+
+    def parse_edam_topics(self):
+        return self.root_dict.get("edam_topics", [])
 
     def parse_is_multi_byte(self):
         return self.root_dict.get("is_multi_byte", self.default_is_multi_byte)
+
+    def parse_sanitize(self):
+        return self.root_dict.get("sanitize", True)
 
     def parse_display_interface(self, default):
         return self.root_dict.get('display_interface', default)
@@ -63,6 +74,10 @@ class YamlToolSource(ToolSource):
         # All YAML tools have only one page (feature is deprecated)
         page_source = YamlPageSource(self.root_dict.get("inputs", {}))
         return PagesSource([page_source])
+
+    def parse_strict_shell(self):
+        # TODO: Add ability to disable this.
+        return True
 
     def parse_stdio(self):
         return error_on_exit_code()
@@ -163,6 +178,9 @@ class YamlToolSource(ToolSource):
             tests.append(_parse_test(i, test_dict))
 
         return rval
+
+    def parse_profile(self):
+        return self.root_dict.get("profile", "16.04")
 
 
 def _parse_test(i, test_dict):

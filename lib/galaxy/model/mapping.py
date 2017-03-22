@@ -5,19 +5,39 @@ are encapsulated here.
 
 import logging
 
-from sqlalchemy import ( and_, asc, Boolean, Column, DateTime, desc, false, ForeignKey, Integer,
-    MetaData, not_, Numeric, select, String, Table, Text, TEXT, true, Unicode, UniqueConstraint )
+from sqlalchemy import (
+    and_,
+    asc,
+    Boolean,
+    Column,
+    DateTime,
+    desc,
+    false,
+    ForeignKey,
+    Integer,
+    MetaData,
+    not_,
+    Numeric,
+    select,
+    String,
+    Table,
+    TEXT,
+    Text,
+    true,
+    Unicode,
+    UniqueConstraint
+)
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext.orderinglist import ordering_list
-from sqlalchemy.types import BigInteger
-from sqlalchemy.orm import backref, object_session, relation, mapper, class_mapper, deferred
+from sqlalchemy.orm import backref, class_mapper, deferred, mapper, object_session, relation
 from sqlalchemy.orm.collections import attribute_mapped_collection
+from sqlalchemy.types import BigInteger
 
 from galaxy import model
+from galaxy.model.base import ModelMapping
+from galaxy.model.custom_types import JSONType, MetadataType, TrimmedString, UUIDType
 from galaxy.model.orm.engine_factory import build_engine
 from galaxy.model.orm.now import now
-from galaxy.model.custom_types import JSONType, MetadataType, TrimmedString, UUIDType
-from galaxy.model.base import ModelMapping
 from galaxy.security import GalaxyRBACAgent
 
 log = logging.getLogger( __name__ )
@@ -33,11 +53,12 @@ model.User.table = Table(
     Column( "email", TrimmedString( 255 ), index=True, nullable=False ),
     Column( "username", TrimmedString( 255 ), index=True, unique=True ),
     Column( "password", TrimmedString( 255 ), nullable=False ),
+    Column( "last_password_change", DateTime, default=now ),
     Column( "external", Boolean, default=False ),
     Column( "form_values_id", Integer, ForeignKey( "form_values.id" ), index=True ),
     Column( "deleted", Boolean, index=True, default=False ),
     Column( "purged", Boolean, index=True, default=False ),
-    Column( "disk_usage", Numeric( 15, 0 ), index=True ) ,
+    Column( "disk_usage", Numeric( 15, 0 ), index=True ),
     Column( "active", Boolean, index=True, default=True, nullable=False ),
     Column( "activation_token", TrimmedString( 64 ), nullable=True, index=True ) )
 
@@ -106,14 +127,14 @@ model.HistoryDatasetAssociation.table = Table(
     Column( "update_time", DateTime, default=now, onupdate=now ),
     Column( "state", TrimmedString( 64 ), index=True, key="_state" ),
     Column( "copied_from_history_dataset_association_id", Integer,
-        ForeignKey( "history_dataset_association.id" ), nullable=True ),
+            ForeignKey( "history_dataset_association.id" ), nullable=True ),
     Column( "copied_from_library_dataset_dataset_association_id", Integer,
-        ForeignKey( "library_dataset_dataset_association.id" ), nullable=True ),
+            ForeignKey( "library_dataset_dataset_association.id" ), nullable=True ),
     Column( "name", TrimmedString( 255 ) ),
     Column( "info", TrimmedString( 255 ) ),
     Column( "blurb", TrimmedString( 255 ) ),
-    Column( "peek" , TEXT ),
-    Column( "tool_version" , TEXT ),
+    Column( "peek", TEXT ),
+    Column( "tool_version", TEXT ),
     Column( "extension", TrimmedString( 64 ) ),
     Column( "metadata", MetadataType(), key="_metadata" ),
     Column( "parent_id", Integer, ForeignKey( "history_dataset_association.id" ), nullable=True ),
@@ -124,7 +145,7 @@ model.HistoryDatasetAssociation.table = Table(
     Column( "hid", Integer ),
     Column( "purged", Boolean, index=True, default=False ),
     Column( "hidden_beneath_collection_instance_id",
-        ForeignKey( "history_dataset_collection_association.id" ), nullable=True ) )
+            ForeignKey( "history_dataset_collection_association.id" ), nullable=True ) )
 
 model.Dataset.table = Table(
     "dataset", metadata,
@@ -136,7 +157,7 @@ model.Dataset.table = Table(
     Column( "purged", Boolean, index=True, default=False ),
     Column( "purgable", Boolean, default=True ),
     Column( "object_store_id", TrimmedString( 255 ), index=True ),
-    Column( "external_filename" , TEXT ),
+    Column( "external_filename", TEXT ),
     Column( "_extra_files_path", TEXT ),
     Column( 'file_size', Numeric( 15, 0 ) ),
     Column( 'total_size', Numeric( 15, 0 ) ),
@@ -354,8 +375,8 @@ model.LibraryDatasetDatasetAssociation.table = Table(
     Column( "name", TrimmedString( 255 ), index=True ),
     Column( "info", TrimmedString( 255 ) ),
     Column( "blurb", TrimmedString( 255 ) ),
-    Column( "peek" , TEXT ),
-    Column( "tool_version" , TEXT ),
+    Column( "peek", TEXT ),
+    Column( "tool_version", TEXT ),
     Column( "extension", TrimmedString( 64 ) ),
     Column( "metadata", MetadataType(), key="_metadata" ),
     Column( "parent_id", Integer, ForeignKey( "library_dataset_dataset_association.id" ), nullable=True ),
@@ -444,6 +465,7 @@ model.Job.table = Table(
     Column( "state", String( 64 ), index=True ),
     Column( "info", TrimmedString( 255 ) ),
     Column( "command_line", TEXT ),
+    Column( "dependencies", JSONType, nullable=True),
     Column( "param_filename", String( 1024 ) ),
     Column( "runner_name", String( 255 ) ),
     Column( "stdout", TEXT ),
@@ -2004,8 +2026,7 @@ mapper( model.JobToOutputDatasetAssociation, model.JobToOutputDatasetAssociation
 mapper( model.JobToInputDatasetCollectionAssociation, model.JobToInputDatasetCollectionAssociation.table, properties=dict(
     job=relation( model.Job ),
     dataset_collection=relation( model.HistoryDatasetCollectionAssociation,
-        lazy=False,
-        backref="dependent_jobs" )
+        lazy=False )
 ) )
 
 mapper( model.JobToOutputDatasetCollectionAssociation, model.JobToOutputDatasetCollectionAssociation.table, properties=dict(
@@ -2100,16 +2121,16 @@ mapper( model.Job, model.Job.table, properties=dict(
     user=relation( model.User ),
     galaxy_session=relation( model.GalaxySession ),
     history=relation( model.History ),
-    library_folder=relation( model.LibraryFolder ),
-    parameters=relation( model.JobParameter, lazy=False ),
+    library_folder=relation( model.LibraryFolder, lazy=True ),
+    parameters=relation( model.JobParameter, lazy=True ),
     input_datasets=relation( model.JobToInputDatasetAssociation ),
-    output_datasets=relation( model.JobToOutputDatasetAssociation ),
-    output_dataset_collection_instances=relation( model.JobToOutputDatasetCollectionAssociation ),
-    output_dataset_collections=relation( model.JobToImplicitOutputDatasetCollectionAssociation ),
+    output_datasets=relation( model.JobToOutputDatasetAssociation, lazy=True ),
+    output_dataset_collection_instances=relation( model.JobToOutputDatasetCollectionAssociation, lazy=True ),
+    output_dataset_collections=relation( model.JobToImplicitOutputDatasetCollectionAssociation, lazy=True ),
     post_job_actions=relation( model.PostJobActionAssociation, lazy=False ),
     input_library_datasets=relation( model.JobToInputLibraryDatasetAssociation ),
-    output_library_datasets=relation( model.JobToOutputLibraryDatasetAssociation ),
-    external_output_metadata=relation( model.JobExternalOutputMetadata, lazy=False ),
+    output_library_datasets=relation( model.JobToOutputLibraryDatasetAssociation, lazy=True ),
+    external_output_metadata=relation( model.JobExternalOutputMetadata, lazy=True ),
     tasks=relation( model.Task )
 ) )
 
@@ -2288,7 +2309,7 @@ mapper( model.StoredWorkflowMenuEntry, model.StoredWorkflowMenuEntry.table, prop
 ) )
 
 mapper( model.WorkflowInvocation, model.WorkflowInvocation.table, properties=dict(
-    history=relation( model.History ),
+    history=relation( model.History, backref=backref('workflow_invocations', uselist=True )),
     input_parameters=relation( model.WorkflowRequestInputParameter ),
     step_states=relation( model.WorkflowRequestStepState ),
     input_step_parameters=relation( model.WorkflowRequestInputStepParmeter ),
@@ -2300,8 +2321,7 @@ mapper( model.WorkflowInvocation, model.WorkflowInvocation.table, properties=dic
         uselist=True,
     ),
     steps=relation( model.WorkflowInvocationStep,
-        backref='workflow_invocation',
-        lazy=False ),
+        backref='workflow_invocation' ),
     workflow=relation( model.Workflow )
 ) )
 
@@ -2424,6 +2444,7 @@ simple_mapping( model.Tag,
 def tag_mapping( tag_association_class, backref_name ):
     simple_mapping( tag_association_class, tag=relation( model.Tag, backref=backref_name), user=relation( model.User ) )
 
+
 tag_mapping( model.HistoryTagAssociation, "tagged_histories" )
 tag_mapping( model.DatasetTagAssociation, "tagged_datasets" )
 tag_mapping( model.HistoryDatasetAssociationTagAssociation, "tagged_history_dataset_associations" )
@@ -2438,8 +2459,9 @@ tag_mapping( model.ToolTagAssociation, "tagged_tools" )
 
 # Annotation tables.
 def annotation_mapping( annotation_class, **kwds ):
-    kwds = dict( [ (key, relation( value ) ) for key, value in kwds.iteritems() ] )
+    kwds = dict( (key, relation( value ) ) for key, value in kwds.items() )
     simple_mapping( annotation_class, **dict(user=relation( model.User ), **kwds ) )
+
 
 annotation_mapping( model.HistoryAnnotationAssociation, history=model.History )
 annotation_mapping( model.HistoryDatasetAssociationAnnotationAssociation, hda=model.HistoryDatasetAssociation )
@@ -2455,8 +2477,9 @@ annotation_mapping( model.LibraryDatasetCollectionAnnotationAssociation,
 
 # Rating tables.
 def rating_mapping( rating_class, **kwds ):
-    kwds = dict( [ (key, relation( value ) ) for key, value in kwds.iteritems() ] )
+    kwds = dict( (key, relation( value ) ) for key, value in kwds.items() )
     simple_mapping( rating_class, **dict(user=relation( model.User ), **kwds ) )
+
 
 rating_mapping( model.HistoryRatingAssociation, history=model.History )
 rating_mapping( model.HistoryDatasetAssociationRatingAssociation, hda=model.HistoryDatasetAssociation )
@@ -2525,11 +2548,24 @@ def db_next_hid( self, n=1 ):
         trans.rollback()
         raise
 
+
 model.History._next_hid = db_next_hid
 
 
+def _workflow_invocation_update( self ):
+    conn = object_session( self ).connection()
+    table = self.table
+    now_val = now()
+    stmt = table.update().values(update_time=now_val).where(and_(table.c.id == self.id, table.c.update_time < now_val))
+    conn.execute(stmt)
+
+
+model.WorkflowInvocation.update = _workflow_invocation_update
+
+
 def init( file_path, url, engine_options={}, create_tables=False, map_install_models=False,
-        database_query_profiling_proxy=False, object_store=None, trace_logger=None, use_pbkdf2=True ):
+        database_query_profiling_proxy=False, object_store=None, trace_logger=None, use_pbkdf2=True,
+        slow_query_log_threshold=0):
     """Connect mappings to the database"""
     # Connect dataset to the file path
     model.Dataset.file_path = file_path
@@ -2538,14 +2574,14 @@ def init( file_path, url, engine_options={}, create_tables=False, map_install_mo
     # Use PBKDF2 password hashing?
     model.User.use_pbkdf2 = use_pbkdf2
     # Load the appropriate db module
-    engine = build_engine( url, engine_options, database_query_profiling_proxy, trace_logger )
+    engine = build_engine( url, engine_options, database_query_profiling_proxy, trace_logger, slow_query_log_threshold )
 
     # Connect the metadata to the database.
     metadata.bind = engine
 
     model_modules = [model]
     if map_install_models:
-        import galaxy.model.tool_shed_install.mapping  # noqa
+        import galaxy.model.tool_shed_install.mapping  # noqa: F401
         from galaxy.model import tool_shed_install
         model_modules.append(tool_shed_install)
 

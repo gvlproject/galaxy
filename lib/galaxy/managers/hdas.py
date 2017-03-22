@@ -251,15 +251,21 @@ class HDASerializer(  # datasets._UnflattenedMetadataDatasetAssociationSerialize
 
         self.default_view = 'summary'
         self.add_view( 'summary', [
-            'id', 'name',
+            'id',
             'type_id',
-            'history_id', 'hid',
-            # why include if model_class is there?
+            'name',
+            'history_id',
+            'hid',
             'history_content_type',
             'dataset_id',
-            'state', 'extension',
+            'state',
+            'extension',
             'deleted', 'purged', 'visible',
-            'type', 'url'
+            'nametags',
+            'type',
+            'url',
+            'create_time',
+            'update_time',
         ])
         self.add_view( 'detailed', [
             'model_class',
@@ -273,7 +279,6 @@ class HDASerializer(  # datasets._UnflattenedMetadataDatasetAssociationSerialize
             'genome_build', 'misc_info', 'misc_blurb',
             'file_ext', 'file_size',
 
-            'create_time', 'update_time',
             'resubmitted',
             'metadata', 'meta_files', 'data_type',
             'peek',
@@ -281,6 +286,7 @@ class HDASerializer(  # datasets._UnflattenedMetadataDatasetAssociationSerialize
             'creating_job',
             'rerunnable',
 
+            'tags',
             'uuid',
             'permissions',
             'file_name',
@@ -292,7 +298,7 @@ class HDASerializer(  # datasets._UnflattenedMetadataDatasetAssociationSerialize
             # 'url',
             'download_url',
 
-            'annotation', 'tags',
+            'annotation',
 
             'api_type'
         ], include_keys_from='summary' )
@@ -303,6 +309,7 @@ class HDASerializer(  # datasets._UnflattenedMetadataDatasetAssociationSerialize
 
         # keyset returned to create show a dataset where the owner has no access
         self.add_view( 'inaccessible', [
+            'accessible',
             'id', 'name', 'history_id', 'hid', 'history_content_type',
             'state', 'deleted', 'visible'
         ])
@@ -325,7 +332,7 @@ class HDASerializer(  # datasets._UnflattenedMetadataDatasetAssociationSerialize
             'misc_blurb'    : self._remap_from( 'blurb' ),
             'file_ext'      : self._remap_from( 'extension' ),
             'file_path'     : self._remap_from( 'file_name' ),
-
+            'nametags'      : self.serialize_nametags,
             'resubmitted'   : lambda i, k, **c: self.hda_manager.has_been_resubmitted( i ),
             'display_apps'  : self.serialize_display_apps,
             'display_types' : self.serialize_old_display_applications,
@@ -345,10 +352,20 @@ class HDASerializer(  # datasets._UnflattenedMetadataDatasetAssociationSerialize
                                                               history_id=self.app.security.encode_id( i.history.id ),
                                                               history_content_id=self.app.security.encode_id( i.id ) ),
             'parent_id'     : self.serialize_id,
-            'accessible'    : lambda *a, **c: True,
+            # TODO: to DatasetAssociationSerializer
+            'accessible'    : lambda i, k, user=None, **c: self.manager.is_accessible( i, user ),
             'api_type'      : lambda *a, **c: 'file',
             'type'          : lambda *a, **c: 'file'
         })
+
+    def serialize( self, hda, keys, user=None, **context ):
+        """
+        Override to hide information to users not able to access.
+        """
+        # TODO: to DatasetAssociationSerializer
+        if not self.manager.is_accessible( hda, user, **context ):
+            keys = self._view_to_keys( 'inaccessible' )
+        return super( HDASerializer, self ).serialize( hda, keys, user=user, **context )
 
     def serialize_display_apps( self, hda, key, trans=None, **context ):
         """
@@ -368,6 +385,17 @@ class HDASerializer(  # datasets._UnflattenedMetadataDatasetAssociationSerialize
                 display_apps.append( dict( label=display_app.name, links=app_links ) )
 
         return display_apps
+
+    def serialize_nametags( self, hda, key, trans=None, **context ):
+        """
+        Return list of 'name' child tags attached to this dataset.
+        TODO: investigate faster ways to fetch 'name' tags and values
+        """
+        nametags = []
+        for tag in hda.tags:
+            if tag.tag.name == 'name':
+                nametags.append(tag.value)
+        return nametags
 
     def serialize_old_display_applications( self, hda, key, trans=None, **context ):
         """

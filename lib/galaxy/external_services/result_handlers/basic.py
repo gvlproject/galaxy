@@ -1,5 +1,5 @@
-from galaxy.util.json import loads
 import logging
+from json import loads
 
 log = logging.getLogger( __name__ )
 
@@ -61,6 +61,7 @@ class ExternalServiceActionJQueryGridResultHandler( ExternalServiceActionResultH
     def handle_result( self, result, param_dict, trans ):
         rval = loads( result.content )
         return trans.fill_template( '/external_services/generic_jquery_grid.mako', result=rval, param_dict=param_dict, action=self.parent )
+
 
 result_type_to_class = {}
 for handler_class in [ ExternalServiceActionResultHandler, ExternalServiceActionURLRedirectResultHandler, ExternalServiceActionJQueryGridResultHandler, ExternalServiceActionJSONResultHandler ]:

@@ -351,7 +351,6 @@ var ToolSearch = Backbone.Model.extend({
         search_hint_string: "search tools",
         min_chars_for_search: 3,
         clear_btn_url: "",
-        search_url: "",
         visible: true,
         query: "",
         results: null,
@@ -521,6 +520,7 @@ var ToolLinkView = BaseView.extend({
         var $link = $('<div/>');
         $link.append(templates.tool_link(this.model.toJSON()));
 
+        var formStyle = this.model.get( 'form_style', null );
         // open upload dialog for upload tool
         if (this.model.id === 'upload1') {
             $link.find('a').on('click', function(e) {
@@ -528,14 +528,11 @@ var ToolLinkView = BaseView.extend({
                 Galaxy.upload.show();
             });
         }
-        else if ( this.model.get( 'model_class' ) === 'Tool' ) { // regular tools
+        else if ( formStyle === 'regular' ) { // regular tools
             var self = this;
             $link.find('a').on('click', function(e) {
                 e.preventDefault();
-                var form = new ToolForm.View( { id : self.model.id, version : self.model.get('version') } );
-                form.deferred.execute(function() {
-                    Galaxy.app.display( form );
-                });
+                Galaxy.router.push( '/', { tool_id : self.model.id, version : self.model.get('version') } );
             });
         }
 
@@ -632,6 +629,12 @@ var ToolSearchView = Backbone.View.extend({
         if (!this.model.is_visible()) {
             this.$el.hide();
         }
+
+        // Adjust top for issue 2907 depending on whether the messagebox is visible.
+        if ($("#messagebox").is(":visible")) {
+            this.$el.css("top","95px");
+        }
+
         this.$el.find('[title]').tooltip();
         return this;
     },

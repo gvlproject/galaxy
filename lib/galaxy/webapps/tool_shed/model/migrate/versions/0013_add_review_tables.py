@@ -52,6 +52,7 @@ def boolean_false(migrate_engine):
     else:
         raise Exception( 'Unable to convert data for unknown database type: %s' % migrate_engine.name )
 
+
 RepositoryReview_table = Table( "repository_review", metadata,
                                 Column( "id", Integer, primary_key=True ),
                                 Column( "create_time", DateTime, default=NOW ),
@@ -88,17 +89,17 @@ def upgrade(migrate_engine):
     # Create new review tables.
     try:
         Component_table.create()
-    except Exception, e:
+    except Exception as e:
         print str(e)
         log.debug( "Creating component table failed: %s" % str( e ) )
     try:
         RepositoryReview_table.create()
-    except Exception, e:
+    except Exception as e:
         print str(e)
         log.debug( "Creating repository_review table failed: %s" % str( e ) )
     try:
         ComponentReview_table.create()
-    except Exception, e:
+    except Exception as e:
         print str(e)
         log.debug( "Creating component_review table failed: %s" % str( e ) )
     # Insert default Component values.
@@ -169,17 +170,17 @@ def downgrade(migrate_engine):
     # Drop review tables.
     try:
         ComponentReview_table.drop()
-    except Exception, e:
+    except Exception as e:
         print str(e)
         log.debug( "Dropping component_review table failed: %s" % str( e ) )
     try:
         RepositoryReview_table.drop()
-    except Exception, e:
+    except Exception as e:
         print str(e)
         log.debug( "Dropping repository_review table failed: %s" % str( e ) )
     try:
         Component_table.drop()
-    except Exception, e:
+    except Exception as e:
         print str(e)
         log.debug( "Dropping component table failed: %s" % str( e ) )
     # Get the id of the REVIEWER group.

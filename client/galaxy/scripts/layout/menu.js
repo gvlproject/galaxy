@@ -1,5 +1,5 @@
 /** Masthead Collection **/
-define(['mvc/tours'], function( Tours ) {
+define(['layout/generic-nav-view', 'mvc/webhooks'], function( GenericNav, Webhooks ) {
 var Collection = Backbone.Collection.extend({
     model: Backbone.Model.extend({
         defaults: {
@@ -10,6 +10,12 @@ var Collection = Backbone.Collection.extend({
     fetch: function( options ){
         options = options || {};
         this.reset();
+
+        //
+        // Chat server tab
+        //
+        var extendedNavItem = new GenericNav.GenericNavView();
+        this.add(extendedNavItem.render());
 
         //
         // Analyze data tab.
@@ -41,23 +47,19 @@ var Collection = Backbone.Collection.extend({
             url             : 'library/index',
             tooltip         : 'Access published resources',
             menu            : [{
-                    title   : 'Data Libraries deprecated',
-                    url     : 'library/index'
-                },{
                     title   : 'Data Libraries',
-                    url     : 'library/list',
-                    divider : true
+                    url     : 'library/list'
                 },{
-                    title   : 'Published Histories',
+                    title   : 'Histories',
                     url     : 'history/list_published'
                 },{
-                    title   : 'Published Workflows',
+                    title   : 'Workflows',
                     url     : 'workflow/list_published'
                 },{
-                    title   : 'Published Visualizations',
+                    title   : 'Visualizations',
                     url     : 'visualization/list_published'
                 },{
-                    title   : 'Published Pages',
+                    title   : 'Pages',
                     url     : 'page/list_published'
             }]
         });
@@ -97,7 +99,47 @@ var Collection = Backbone.Collection.extend({
                     title   : 'Saved Visualizations',
                     url     : 'visualization/list',
                     target  : '_frame'
-            }]
+                },{
+                    title   : 'Interactive Environments',
+                    url     : 'visualization/gie_list',
+                    target  : 'galaxy_main'
+                }
+            ]
+        });
+
+        //
+        // Webhooks
+        //
+        Webhooks.add({
+            url: 'api/webhooks/masthead/all',
+            callback: function(webhooks) {
+                $(document).ready(function() {
+                    $.each(webhooks.models, function(index, model) {
+                        var webhook = model.toJSON();
+                        if (webhook.activate) {
+                            // Galaxy.page is undefined for data libraries, workflows pages
+                            if( Galaxy.page ) {
+                                Galaxy.page.masthead.collection.add({
+                                    id      : webhook.name,
+                                    icon    : webhook.config.icon,
+                                    url     : webhook.config.url,
+                                    tooltip : webhook.config.tooltip,
+                                    onclick : webhook.config.function && new Function(webhook.config.function),
+                                });
+                            }
+                            else if( Galaxy.masthead ) {
+                                Galaxy.masthead.collection.add({
+                                    id      : webhook.name,
+                                    icon    : webhook.config.icon,
+                                    url     : webhook.config.url,
+                                    tooltip : webhook.config.tooltip,
+                                    onclick : webhook.config.function && new Function(webhook.config.function),
+                                });
+                            }
+                        }
+                    });
+                });
+            }
         });
 
         //
@@ -117,7 +159,7 @@ var Collection = Backbone.Collection.extend({
         var helpTab = {
             id              : 'help',
             title           : 'Help',
-            tooltip         : 'Support, contact, and community hubs',
+            tooltip         : 'Support, contact, and community',
             menu            : [{
                     title   : 'Support',
                     url     : options.support_url,
@@ -144,15 +186,15 @@ var Collection = Backbone.Collection.extend({
                     target  : '_blank'
                 },{
                     title   : 'Interactive Tours',
+                    url     : 'tours',
                     onclick : function(){
-                        if (Galaxy.app){
-                            Galaxy.app.display(new Tours.ToursView());
+                        if (Galaxy.router){
+                            Galaxy.router.navigate('tours', {'trigger': true});
                         } else {
                             // Redirect and use clientside routing to go to tour index
-                            window.location = Galaxy.root + "#/tours";
+                            window.location = Galaxy.root + "tours";
                         }
-                    },
-                    target  : 'galaxy_main'
+                    }
             }]
         };
         options.terms_url && helpTab.menu.push({
@@ -182,15 +224,17 @@ var Collection = Backbone.Collection.extend({
                 cls             : 'loggedout-only',
                 tooltip         : 'Account registration or login',
                 menu            : [{
-                    title       : 'Login',
-                    url         : 'user/login',
-                    target      : 'galaxy_main'
+                    title           : 'Login',
+                    url             : 'user/login',
+                    target          : 'galaxy_main',
+                    noscratchbook   : true
                 }]
             };
             options.allow_user_creation && userTab.menu.push({
-                title   : 'Register',
-                url     : 'user/create',
-                target  : 'galaxy_main'
+                title           : 'Register',
+                url             : 'user/create',
+                target          : 'galaxy_main',
+                noscratchbook   : true
             });
             this.add( userTab );
         } else {
@@ -198,13 +242,20 @@ var Collection = Backbone.Collection.extend({
                 id              : 'user',
                 title           : 'User',
                 cls             : 'loggedin-only',
-                tooltip         : 'Account preferences and saved data',
+                tooltip         : 'Account and saved data',
                 menu            : [{
                         title   : 'Logged in as ' + Galaxy.user.get( 'email' )
                     },{
                         title   : 'Preferences',
-                        url     : 'user?cntrller=user',
-                        target  : 'galaxy_main'
+                        url     : 'user',
+                        target  : 'galaxy_main',
+                        onclick : function() {
+                            if ( Galaxy.router ) {
+                                Galaxy.router.push( 'user' );
+                            } else {
+                                window.location = Galaxy.root + 'user';
+                            }
+                        }
                     },{
                         title   : 'Custom Builds',
                         url     : 'user/dbkeys',
@@ -226,17 +277,8 @@ var Collection = Backbone.Collection.extend({
                         title   : 'Saved Pages',
                         url     : 'page/list',
                         target  : '_top'
-                    },{
-                        title   : 'API Keys',
-                        url     : 'user/api_keys?cntrller=user',
-                        target  : 'galaxy_main'
-                }]
+                    }]
             };
-            options.use_remote_user && userTab.menu.push({
-                title   : 'Public Name',
-                url     : 'user/edit_username?cntrller=user',
-                target  : 'galaxy_main'
-            });
             this.add( userTab );
         }
         var activeView = this.get( options.active_view );
@@ -274,7 +316,7 @@ var Tab = Backbone.View.extend({
         this.$toggle.html( this.model.get( 'title' ) || '' )
                     .removeClass().addClass( 'dropdown-toggle' )
                     .addClass( this.model.get( 'cls' ) )
-                    .addClass( this.model.get( 'icon' ) && 'fa fa-2x ' + this.model.get( 'icon' ) )
+                    .addClass( this.model.get( 'icon' ) && 'dropdown-icon fa ' + this.model.get( 'icon' ) )
                     .addClass( this.model.get( 'toggle' ) && 'toggle' )
                     .attr( 'target', this.model.get( 'target' ) )
                     .attr( 'href', this.model.get( 'url' ) )
@@ -310,9 +352,10 @@ var Tab = Backbone.View.extend({
     _buildMenuItem: function ( options ) {
         var self = this;
         options = _.defaults( options || {}, {
-            title       : '',
-            url         : '',
-            target      : '_parent'
+            title           : '',
+            url             : '',
+            target          : '_parent',
+            noscratchbook   : false
         });
         options.url = self._formatUrl( options.url );
         return $( '<li/>' ).append(

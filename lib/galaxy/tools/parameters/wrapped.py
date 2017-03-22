@@ -1,20 +1,21 @@
 from galaxy.tools.parameters.basic import (
-    DataToolParameter,
     DataCollectionToolParameter,
+    DataToolParameter,
     SelectToolParameter
 )
-from galaxy.tools.wrappers import (
-    InputValueWrapper,
-    SelectToolParameterWrapper,
-    DatasetFilenameWrapper,
-    DatasetListWrapper,
-    DatasetCollectionWrapper
-)
 from galaxy.tools.parameters.grouping import (
-    Repeat,
     Conditional,
+    Repeat,
     Section
 )
+from galaxy.tools.wrappers import (
+    DatasetCollectionWrapper,
+    DatasetFilenameWrapper,
+    DatasetListWrapper,
+    InputValueWrapper,
+    SelectToolParameterWrapper
+)
+
 PARAMS_UNWRAPPED = object()
 
 
@@ -40,7 +41,7 @@ class WrappedParameters( object ):
         incoming = self.incoming
 
         # Wrap tool inputs as necessary
-        for input in inputs.itervalues():
+        for input in inputs.values():
             if input.name not in input_values and skip_missing_values:
                 continue
             value = input_values[ input.name ]
@@ -52,10 +53,9 @@ class WrappedParameters( object ):
                 current = values[ "__current_case__" ]
                 self.wrap_values( input.cases[current].inputs, values, skip_missing_values=skip_missing_values )
             elif isinstance( input, Section ):
-                values = input_values[ input.name ]
+                values = value
                 self.wrap_values( input.inputs, values, skip_missing_values=skip_missing_values )
             elif isinstance( input, DataToolParameter ) and input.multiple:
-                value = input_values[ input.name ]
                 dataset_instances = DatasetListWrapper.to_dataset_instances( value )
                 input_values[ input.name ] = \
                     DatasetListWrapper( None,
@@ -65,7 +65,7 @@ class WrappedParameters( object ):
                                         name=input.name )
             elif isinstance( input, DataToolParameter ):
                 input_values[ input.name ] = \
-                    DatasetFilenameWrapper( input_values[ input.name ],
+                    DatasetFilenameWrapper( value,
                                             datatypes_registry=trans.app.datatypes_registry,
                                             tool=tool,
                                             name=input.name )
@@ -74,7 +74,7 @@ class WrappedParameters( object ):
             elif isinstance( input, DataCollectionToolParameter ):
                 input_values[ input.name ] = DatasetCollectionWrapper(
                     None,
-                    input_values[ input.name ],
+                    value,
                     datatypes_registry=trans.app.datatypes_registry,
                     tool=tool,
                     name=input.name,
@@ -113,4 +113,4 @@ def make_list_copy( from_list ):
     return new_list
 
 
-__all__ = [ 'WrappedParameters', 'make_dict_copy' ]
+__all__ = ( 'WrappedParameters', 'make_dict_copy' )

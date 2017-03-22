@@ -1,8 +1,15 @@
 """
 Functionality for dealing with tool errors.
 """
+import cgi
 import string
-from galaxy import model, util, web
+
+from galaxy import (
+    model,
+    util,
+    web
+)
+from galaxy.util import unicodify
 
 error_report_template = """
 GALAXY TOOL ERROR REPORT
@@ -51,6 +58,75 @@ ${job_traceback}
 (This is an automated message).
 """
 
+error_report_template_html = """
+<html>
+    <body>
+<h1>Galaxy Tool Error Report</h1>
+<span class="sub"><i>from</i> <span style="font-family: monospace;"><a href="${host}">${host}</a></span>
+
+<h3>Error Localization</h3>
+<table style="margin:1em">
+    <tbody>
+        <tr><td>Dataset</td><td>${dataset_id} (${dataset_id_encoded})</td></tr>
+        <tr style="background-color: #f2f2f2"><td>History</td><td><a href="${history_view_link}">${history_id} (${history_id_encoded})</a></td></tr>
+        <tr><td>Failed Job</td><td>${hid}: ${history_item_name} (${hda_id_encoded})</td></tr>
+    </tbody>
+</table>
+
+<h3>User Provided Information</h3>
+
+The user <a href="mailto:${email_str}"><span style="font-family: monospace;">${email_str}</span></a> provided the following information:
+
+<pre style="white-space: pre-wrap;background: #eeeeee;border:1px solid black;padding:1em;">
+${message}
+</pre>
+
+
+<h3>Detailed Job Information</h3>
+
+Job environment and execution information is available at the job <a href="${hda_show_params_link}">Info Page</a>.
+
+<table style="margin:1em">
+    <tbody>
+        <tr><td>Job ID</td><td>${job_id} (${job_id_encoded})</td></tr>
+        <tr style="background-color: #f2f2f2"><td>Tool ID</td><td>${job_tool_id}</td></tr>
+        <tr><td>Tool Version</td><td>${tool_version}</td></tr>
+        <tr style="background-color: #f2f2f2"><td>Job PID or DRM id</td><td>${job_runner_external_id}</td></tr>
+        <tr><td>Job Tool Version</td><td>${job_tool_version}</td></tr>
+    </tbody>
+</table>
+
+<h3>Job Execution and Failure Information</h3>
+
+<h4>Command Line</h4>
+<pre style="white-space: pre-wrap;background: #eeeeee;border:1px solid black;padding:1em;">
+${job_command_line}
+</pre>
+
+<h4>stderr</h4>
+<pre style="white-space: pre-wrap;background: #eeeeee;border:1px solid black;padding:1em;">
+${job_stderr}
+</pre>
+
+<h4>stdout</h4>
+<pre style="white-space: pre-wrap;background: #eeeeee;border:1px solid black;padding:1em;">
+${job_stdout}
+</pre>
+
+<h4>Job Information</h4>
+<pre style="white-space: pre-wrap;background: #eeeeee;border:1px solid black;padding:1em;">
+${job_info}
+</pre>
+
+<h4>Job Traceback</h4>
+<pre style="white-space: pre-wrap;background: #eeeeee;border:1px solid black;padding:1em;">
+${job_traceback}
+</pre>
+
+This is an automated message. Do not reply to this address.
+</body></html>
+"""
+
 
 class ErrorReporter( object ):
     def __init__( self, hda, app ):
@@ -91,30 +167,41 @@ class ErrorReporter( object ):
             email_str = "'%s' (providing preferred contact email '%s')" % (user.email, email)
         else:
             email_str = "'%s'" % (email or 'anonymously')
-        self.report = string.Template( error_report_template ) \
-            .safe_substitute( host=host,
-                              dataset_id_encoded=self.app.security.encode_id( hda.dataset_id ),
-                              dataset_id=hda.dataset_id,
-                              history_id_encoded=history_id_encoded,
-                              history_id=hda.history_id,
-                              hda_id_encoded=hda_id_encoded,
-                              hid=hda.hid,
-                              history_item_name=hda.get_display_name(),
-                              history_view_link=history_view_link,
-                              hda_show_params_link=hda_show_params_link,
-                              job_id_encoded=self.app.security.encode_id( job.id ),
-                              job_id=job.id,
-                              tool_version=job.tool_version,
-                              job_tool_id=job.tool_id,
-                              job_tool_version=hda.tool_version,
-                              job_runner_external_id=job.job_runner_external_id,
-                              job_command_line=job.command_line,
-                              job_stderr=util.unicodify( job.stderr ),
-                              job_stdout=util.unicodify( job.stdout ),
-                              job_info=util.unicodify( job.info ),
-                              job_traceback=util.unicodify( job.traceback ),
-                              email_str=email_str,
-                              message=util.unicodify( message ) )
+
+        report_variables = dict(
+            host=host,
+            dataset_id_encoded=self.app.security.encode_id( hda.dataset_id ),
+            dataset_id=hda.dataset_id,
+            history_id_encoded=history_id_encoded,
+            history_id=hda.history_id,
+            hda_id_encoded=hda_id_encoded,
+            hid=hda.hid,
+            history_item_name=hda.get_display_name(),
+            history_view_link=history_view_link,
+            hda_show_params_link=hda_show_params_link,
+            job_id_encoded=self.app.security.encode_id( job.id ),
+            job_id=job.id,
+            tool_version=job.tool_version,
+            job_tool_id=job.tool_id,
+            job_tool_version=hda.tool_version,
+            job_runner_external_id=job.job_runner_external_id,
+            job_command_line=job.command_line,
+            job_stderr=util.unicodify( job.stderr ),
+            job_stdout=util.unicodify( job.stdout ),
+            job_info=util.unicodify( job.info ),
+            job_traceback=util.unicodify( job.traceback ),
+            email_str=email_str,
+            message=util.unicodify( message )
+        )
+
+        self.report = string.Template( error_report_template ).safe_substitute( report_variables )
+
+        # Escape all of the content  for use in the HTML report
+        for parameter in report_variables.keys():
+            if report_variables[parameter] is not None:
+                report_variables[parameter] = cgi.escape(unicodify(report_variables[parameter]))
+
+        self.html_report = string.Template( error_report_template_html ).safe_substitute( report_variables )
 
     def _send_report( self, user, email=None, message=None, **kwd ):
         return self.report
@@ -146,5 +233,6 @@ class EmailErrorReporter( ErrorReporter ):
             subject = "%s (%s)" % ( subject, self.app.toolbox.get_tool( self.job.tool_id, self.job.tool_version ).old_id )
         except Exception:
             pass
+
         # Send it
-        return util.send_mail( frm, to, subject, self.report, self.app.config )
+        return util.send_mail( frm, to, subject, self.report, self.app.config, html=self.html_report )

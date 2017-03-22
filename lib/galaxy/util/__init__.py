@@ -3,13 +3,12 @@
 Utility functions used systemwide.
 
 """
-
 from __future__ import absolute_import
 
 import binascii
 import collections
 import errno
-import grp
+import json
 import logging
 import os
 import random
@@ -19,25 +18,28 @@ import smtplib
 import stat
 import string
 import sys
-import time
 import tempfile
 import threading
+import time
+try:
+    import grp
+except ImportError:
+    # For Pulsar on Windows (which does not use the function that uses grp)
+    grp = None
 
-from os.path import relpath
-from hashlib import md5
-
-from six import binary_type
-from six import iteritems
-from six import PY3
-from six import string_types, text_type
-from six.moves import email_mime_text
-from six.moves.urllib import parse as urlparse
-from six.moves import xrange
-from six.moves import zip
-from xml.etree import ElementTree, ElementInclude
-
-from galaxy.util import json
 from datetime import datetime
+from hashlib import md5
+from os.path import normpath, relpath
+from xml.etree import ElementInclude, ElementTree
+from xml.etree.ElementTree import ParseError
+
+from six import binary_type, iteritems, string_types, text_type
+from six.moves import email_mime_multipart, email_mime_text, xrange, zip
+from six.moves.urllib import (
+    parse as urlparse,
+    request as urlrequest
+)
+from six.moves.urllib.request import urlopen
 
 try:
     import docutils.core as docutils_core
@@ -46,15 +48,9 @@ except ImportError:
     docutils_core = None
     docutils_html4css1 = None
 
-from .inflection import Inflector, English
+from .inflection import English, Inflector
+
 inflector = Inflector(English)
-
-if PY3:
-    def list_map(f, input):
-        return list(map(f, input))
-else:
-    list_map = map
-
 
 log = logging.getLogger(__name__)
 _lock = threading.RLock()
@@ -69,6 +65,7 @@ bz2_magic = 'BZh'
 DEFAULT_ENCODING = os.environ.get('GALAXY_DEFAULT_ENCODING', 'utf-8')
 NULL_CHAR = '\000'
 BINARY_CHARS = [ NULL_CHAR ]
+FILENAME_VALID_CHARS = '.,^_-()[]0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 
 def remove_protocol_from_url( url ):
@@ -118,6 +115,35 @@ def is_uuid( value ):
         return True
     else:
         return False
+
+
+def directory_hash_id( id ):
+    """
+
+    >>> directory_hash_id( 100 )
+    ['000']
+    >>> directory_hash_id( "90000" )
+    ['090']
+    >>> directory_hash_id("777777777")
+    ['000', '777', '777']
+    >>> directory_hash_id("135ee48a-4f51-470c-ae2f-ce8bd78799e6")
+    ['1', '3', '5']
+    """
+    s = str( id )
+    l = len( s )
+    # Shortcut -- ids 0-999 go under ../000/
+    if l < 4:
+        return [ "000" ]
+    if not is_uuid(s):
+        # Pad with zeros until a multiple of three
+        padded = ( ( 3 - len( s ) % 3 ) * "0" ) + s
+        # Drop the last three digits -- 1000 files per directory
+        padded = padded[:-3]
+        # Break into chunks of three
+        return [ padded[ i * 3:(i + 1 ) * 3 ] for i in range( len( padded ) // 3 ) ]
+    else:
+        # assume it is a UUID
+        return list(iter(s[0:3]))
 
 
 def get_charset_from_http_headers( headers, default=None ):
@@ -184,7 +210,11 @@ def parse_xml( fname ):
         def doctype( *args ):
             pass
     tree = ElementTree.ElementTree()
-    root = tree.parse( fname, parser=ElementTree.XMLParser( target=DoctypeSafeCallbackTarget() ) )
+    try:
+        root = tree.parse( fname, parser=ElementTree.XMLParser( target=DoctypeSafeCallbackTarget() ) )
+    except ParseError:
+        log.exception("Error parsing file %s", fname)
+        raise
     ElementInclude.include( root )
     return tree
 
@@ -417,6 +447,7 @@ def pretty_print_json(json_data, is_json_string=False):
         json_data = json.loads(json_data)
     return json.dumps(json_data, sort_keys=True, indent=4)
 
+
 # characters that are valid
 valid_chars = set(string.ascii_letters + string.digits + " -=_.()/+*^,:?!")
 
@@ -451,7 +482,7 @@ def sanitize_text( text, valid_characters=valid_chars, character_map=mapped_char
     and lists of strings; non-string entities will be cast to strings.
     """
     if isinstance( text, list ):
-        return list_map( lambda x: sanitize_text( x, valid_characters=valid_characters, character_map=character_map, invalid_character=invalid_character ), text )
+        return [ sanitize_text( x, valid_characters=valid_characters, character_map=character_map, invalid_character=invalid_character ) for x in text ]
     if not isinstance( text, string_types ):
         text = smart_str( text )
     return _sanitize_text_helper( text, valid_characters=valid_characters, character_map=character_map )
@@ -490,9 +521,10 @@ def sanitize_param( value, valid_characters=valid_chars, character_map=mapped_ch
     if isinstance( value, string_types ):
         return sanitize_text( value, valid_characters=valid_characters, character_map=character_map, invalid_character=invalid_character )
     elif isinstance( value, list ):
-        return list_map( lambda x: sanitize_text( x, valid_characters=valid_characters, character_map=character_map, invalid_character=invalid_character ), value )
+        return [ sanitize_text( x, valid_characters=valid_characters, character_map=character_map, invalid_character=invalid_character ) for x in value ]
     else:
         raise Exception('Unknown parameter type (%s)' % ( type( value ) ))
+
 
 valid_filename_chars = set( string.ascii_letters + string.digits + '_.' )
 invalid_filenames = [ '', '.', '..' ]
@@ -542,7 +574,7 @@ def mask_password_from_url( url ):
 
 
 def ready_name_for_url( raw_name ):
-    """ General method to convert a string (i.e. object name) to a URL-ready
+    u""" General method to convert a string (i.e. object name) to a URL-ready
     slug.
 
     >>> ready_name_for_url( "My Cool Object" )
@@ -685,9 +717,11 @@ class Params( object ):
                 # name. Anything relying on NEVER_SANITIZE should be
                 # changed to not require this and NEVER_SANITIZE should be
                 # removed.
-                if key not in self.NEVER_SANITIZE and True not in [ key.endswith( "|%s" % nonsanitize_parameter ) for
-                                                                    nonsanitize_parameter in self.NEVER_SANITIZE ]:
-                    self.__dict__[ key ] = sanitize_param( value )
+                if (value is not None and
+                    key not in self.NEVER_SANITIZE and
+                    True not in [ key.endswith( "|%s" % nonsanitize_parameter ) for
+                                  nonsanitize_parameter in self.NEVER_SANITIZE ]):
+                        self.__dict__[ key ] = sanitize_param( value )
                 else:
                     self.__dict__[ key ] = value
         else:
@@ -736,7 +770,7 @@ def rst_to_html( s ):
     class FakeStream( object ):
         def write( self, str ):
             if len( str ) > 0 and not str.isspace():
-                log.warn( str )
+                log.warning( str )
 
     settings_overrides = {
         "embed_stylesheet": False,
@@ -768,6 +802,7 @@ def xml_text(root, name=None):
     # No luck, return empty string
     return ''
 
+
 # asbool implementation pulled from PasteDeploy
 truthy = frozenset(['true', 'yes', 'on', 'y', 't', '1'])
 falsy = frozenset(['false', 'no', 'off', 'n', 'f', '0'])
@@ -786,7 +821,7 @@ def asbool(obj):
 
 
 def string_as_bool( string ):
-    if str( string ).lower() in ( 'true', 'yes', 'on' ):
+    if str( string ).lower() in ( 'true', 'yes', 'on', '1' ):
         return True
     else:
         return False
@@ -869,25 +904,33 @@ def unicodify(value, encoding=DEFAULT_ENCODING, error='replace', default=None):
     return value
 
 
-def smart_str(s, encoding='utf-8', strings_only=False, errors='strict'):
-    """
+def smart_str(s, encoding=DEFAULT_ENCODING, strings_only=False, errors='strict'):
+    u"""
     Returns a bytestring version of 's', encoded as specified in 'encoding'.
 
     If strings_only is True, don't convert (some) non-string-like objects.
 
     Adapted from an older, simpler version of django.utils.encoding.smart_str.
+
+    >>> assert smart_str(None) == b'None'
+    >>> assert smart_str(None, strings_only=True) is None
+    >>> assert smart_str(3) == b'3'
+    >>> assert smart_str(3, strings_only=True) == 3
+    >>> assert smart_str(b'a bytes string') == b'a bytes string'
+    >>> assert smart_str(u'a simple unicode string') == b'a simple unicode string'
+    >>> assert smart_str(u'à strange ünicode ڃtring') == b'\\xc3\\xa0 strange \\xc3\\xbcnicode \\xda\\x83tring'
+    >>> assert smart_str(b'\\xc3\\xa0n \\xc3\\xabncoded utf-8 string', encoding='latin-1') == b'\\xe0n \\xebncoded utf-8 string'
     """
     if strings_only and isinstance(s, (type(None), int)):
         return s
-    if not isinstance(s, string_types):
-        try:
-            return str(s)
-        except UnicodeEncodeError:
-            return text_type(s).encode(encoding, errors)
-    elif isinstance(s, text_type):
+    if not isinstance(s, string_types) and not isinstance(s, binary_type):
+        # In Python 2, s is not an instance of basestring
+        # In Python 3, s is not an instance of bytes or str
+        s = str(s)
+    if not isinstance(s, binary_type):
         return s.encode(encoding, errors)
-    elif s and encoding != 'utf-8':
-        return s.decode('utf-8', errors).encode(encoding, errors)
+    elif s and encoding != DEFAULT_ENCODING:
+        return s.decode(DEFAULT_ENCODING, errors).encode(encoding, errors)
     else:
         return s
 
@@ -988,8 +1031,7 @@ def read_dbnames(filename):
                     ucsc_builds[db_base].append((build_rev, fields[0], fields[1]))
             except:
                 continue
-        sort_names = name_to_db_base.keys()
-        sort_names.sort()
+        sort_names = sorted(name_to_db_base.keys())
         for name in sort_names:
             db_base = name_to_db_base[name]
             ucsc_builds[db_base].sort()
@@ -1077,7 +1119,7 @@ def mkstemp_ln( src, prefix='mkstemp_ln_' ):
     dir = os.path.dirname(src)
     names = tempfile._get_candidate_names()
     for seq in xrange(tempfile.TMP_MAX):
-        name = names.next()
+        name = next(names)
         file = os.path.join(dir, prefix + name)
         try:
             os.link( src, file )
@@ -1134,14 +1176,14 @@ def docstring_trim(docstring):
     # and split into a list of lines:
     lines = docstring.expandtabs().splitlines()
     # Determine minimum indentation (first line doesn't count):
-    indent = sys.maxint
+    indent = sys.maxsize
     for line in lines[1:]:
         stripped = line.lstrip()
         if stripped:
             indent = min(indent, len(line) - len(stripped))
     # Remove indentation (first line is special):
     trimmed = [lines[0].strip()]
-    if indent < sys.maxint:
+    if indent < sys.maxsize:
         for line in lines[1:]:
             trimmed.append(line[indent:].rstrip())
     # Strip off trailing and leading blank lines:
@@ -1212,19 +1254,51 @@ def size_to_bytes( size ):
         return int( size )
 
 
-def send_mail( frm, to, subject, body, config ):
+def send_mail( frm, to, subject, body, config, html=None ):
     """
     Sends an email.
+
+    :type  frm: str
+    :param frm: from address
+
+    :type  to: str
+    :param to: to address
+
+    :type  subject: str
+    :param subject: Subject line
+
+    :type  body: str
+    :param body: Body text (should be plain text)
+
+    :type  config: object
+    :param config: Galaxy configuration object
+
+    :type  html: str
+    :param html: Alternative HTML representation of the body content. If
+                 provided will convert the message to a MIMEMultipart. (Default 'None')
     """
+
     to = listify( to )
-    msg = email_mime_text.MIMEText(  body.encode( 'ascii', 'replace' ) )
+    if html:
+        msg = email_mime_multipart.MIMEMultipart('alternative')
+    else:
+        msg = email_mime_text.MIMEText(  body.encode( 'ascii', 'replace' ) )
+
     msg[ 'To' ] = ', '.join( to )
     msg[ 'From' ] = frm
     msg[ 'Subject' ] = subject
+
     if config.smtp_server is None:
         log.error( "Mail is not configured for this Galaxy instance." )
         log.info( msg )
         return
+
+    if html:
+        mp_text = email_mime_text.MIMEText( body.encode( 'ascii', 'replace' ), 'plain' )
+        mp_html = email_mime_text.MIMEText( html.encode( 'ascii', 'replace' ), 'html' )
+        msg.attach(mp_text)
+        msg.attach(mp_html)
+
     smtp_ssl = asbool( getattr(config, 'smtp_ssl', False ) )
     if smtp_ssl:
         s = smtplib.SMTP_SSL()
@@ -1296,6 +1370,7 @@ def safe_str_cmp(a, b):
         rv |= ord(x) ^ ord(y)
     return rv == 0
 
+
 galaxy_root_path = os.path.join(__path__[0], "..", "..", "..")
 
 
@@ -1326,7 +1401,7 @@ def config_directories_from_setting( directories_setting, galaxy_root=galaxy_roo
         if not directory.startswith( '/' ):
             directory = os.path.join( galaxy_root, directory )
         if not os.path.exists( directory ):
-            log.warn( 'directory not found: %s', directory )
+            log.warning( 'directory not found: %s', directory )
             continue
         directories.append( directory )
     return directories
@@ -1350,6 +1425,99 @@ def parse_int(value, min_val=None, max_val=None, default=None, allow_none=False)
             raise
 
 
+def parse_non_hex_float( s ):
+    """
+    Parse string `s` into a float but throw a `ValueError` if the string is in
+    the otherwise acceptable format `\d+e\d+` (e.g. 40000000000000e5.)
+
+    This can be passed into `json.loads` to prevent a hex string in the above
+    format from being incorrectly parsed as a float in scientific notation.
+
+    >>> parse_non_hex_float( '123.4' )
+    123.4
+    >>> parse_non_hex_float( '2.45e+3' )
+    2450.0
+    >>> parse_non_hex_float( '2.45e-3' )
+    0.00245
+    >>> parse_non_hex_float( '40000000000000e5' )
+    Traceback (most recent call last):
+        ...
+    ValueError: could not convert string to float: 40000000000000e5
+    """
+    f = float( s )
+    # successfully parsed as float if here - check for format in original string
+    if 'e' in s and not ( '+' in s or '-' in s ):
+        raise ValueError( 'could not convert string to float: ' + s )
+    return f
+
+
+def build_url( base_url, port=80, scheme='http', pathspec=None, params=None, doseq=False ):
+    if params is None:
+        params = dict()
+    if pathspec is None:
+        pathspec = []
+    parsed_url = urlparse.urlparse( base_url )
+    if scheme != 'http':
+        parsed_url.scheme = scheme
+    if port != 80:
+        url = '%s://%s:%d/%s' % ( parsed_url.scheme, parsed_url.netloc.rstrip( '/' ), int( port ), parsed_url.path )
+    else:
+        url = '%s://%s/%s' % ( parsed_url.scheme, parsed_url.netloc.rstrip( '/' ), parsed_url.path.lstrip( '/' ) )
+    if len( pathspec ) > 0:
+        url = '%s/%s' % ( url.rstrip( '/' ), '/'.join( pathspec ) )
+    if parsed_url.query:
+        for query_parameter in parsed_url.query.split( '&' ):
+            key, value = query_parameter.split( '=' )
+            params[ key ] = value
+    if params:
+        url += '?%s' % urlparse.urlencode( params, doseq=doseq )
+    return url
+
+
+def url_get( base_url, password_mgr=None, pathspec=None, params=None ):
+    """Make contact with the uri provided and return any contents."""
+    # Uses system proxy settings if they exist.
+    proxy = urlrequest.ProxyHandler()
+    if password_mgr is not None:
+        auth = urlrequest.HTTPDigestAuthHandler( password_mgr )
+        urlopener = urlrequest.build_opener( proxy, auth )
+    else:
+        urlopener = urlrequest.build_opener( proxy )
+    urlrequest.install_opener( urlopener )
+    full_url = build_url( base_url, pathspec=pathspec, params=params )
+    response = urlopener.open( full_url )
+    content = response.read()
+    response.close()
+    return content
+
+
+def download_to_file(url, dest_file_path, timeout=30, chunk_size=2 ** 20):
+    """Download a URL to a file in chunks."""
+    src = urlopen(url, timeout=timeout)
+    with open(dest_file_path, 'wb') as f:
+        while True:
+            chunk = src.read(chunk_size)
+            if not chunk:
+                break
+            f.write(chunk)
+
+
+def safe_relpath(path):
+    """
+    Given what we expect to be a relative path, determine whether the path
+    would exist inside the current directory.
+
+    :type   path:   string
+    :param  path:   a path to check
+    :rtype:         bool
+    :returns:       ``True`` if path is relative and does not reference a path
+        in a parent directory, ``False`` otherwise.
+    """
+    if path.startswith(os.sep) or normpath(path).startswith(os.pardir):
+        return False
+    return True
+
+
 class ExecutionTimer(object):
 
     def __init__(self):
@@ -1358,6 +1526,7 @@ class ExecutionTimer(object):
     def __str__(self):
         elapsed = (time.time() - self.begin) * 1000.0
         return "(%0.3f ms)" % elapsed
+
 
 if __name__ == '__main__':
     import doctest

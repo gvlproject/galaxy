@@ -1,23 +1,15 @@
 #!/usr/bin/env python
 """
 """
-import os
-import imp
 import unittest
 
-test_utils = imp.load_source( 'test_utils',
-    os.path.join( os.path.dirname( __file__), '../unittest_utils/utility.py' ) )
-
 from galaxy import model
-
-from base import BaseTestCase
-from base import CreatesCollectionsMixin
-from galaxy.managers.datasets import DatasetManager
-from galaxy.managers.histories import HistoryManager
-from galaxy.managers.hdas import HDAManager
-
 from galaxy.managers.collections import DatasetCollectionManager
+from galaxy.managers.datasets import DatasetManager
+from galaxy.managers.hdas import HDAManager
+from galaxy.managers.histories import HistoryManager
 
+from .base import BaseTestCase, CreatesCollectionsMixin
 
 # =============================================================================
 default_password = '123456'
@@ -119,9 +111,9 @@ class DatasetCollectionManagerTestCase( BaseTestCase, CreatesCollectionsMixin ):
 
         self.log( "should be set from a dictionary" )
         self.collection_manager._set_from_dict( self.trans, hdca, {
-            'deleted'   : True,
-            'visible'   : False,
-            'name'      : 'New Name',
+            'deleted': True,
+            'visible': False,
+            'name': 'New Name',
             # TODO: doesn't work
             # 'tags'      : [ 'one', 'two', 'three' ]
             # 'annotations'      : [?]

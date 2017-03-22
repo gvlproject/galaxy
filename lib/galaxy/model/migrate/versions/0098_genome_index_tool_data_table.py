@@ -1,6 +1,8 @@
 """
 Migration script to create the genome_index_tool_data table.
 """
+from __future__ import print_function
+
 import datetime
 import logging
 import sys
@@ -34,13 +36,13 @@ GenomeIndexToolData_table = Table( "genome_index_tool_data", metadata,
 
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    print __doc__
+    print(__doc__)
 
     metadata.reflect()
     try:
         GenomeIndexToolData_table.create()
-    except Exception, e:
-        log.debug( "Creating genome_index_tool_data table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating genome_index_tool_data table failed.")
 
 
 def downgrade(migrate_engine):
@@ -48,5 +50,5 @@ def downgrade(migrate_engine):
     metadata.reflect()
     try:
         GenomeIndexToolData_table.drop()
-    except Exception, e:
-        log.debug( "Dropping genome_index_tool_data table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping genome_index_tool_data table failed.")

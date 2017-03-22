@@ -1,19 +1,19 @@
 """
 Migration script to rename the sequencer information form type to external service information form
 """
-import datetime
+from __future__ import print_function
+
 import logging
 
 from sqlalchemy import MetaData
 
-now = datetime.datetime.utcnow
 log = logging.getLogger( __name__ )
 metadata = MetaData()
 
 
 def upgrade(migrate_engine):
     metadata.bind = migrate_engine
-    print __doc__
+    print(__doc__)
     metadata.reflect()
     current_form_type = 'Sequencer Information Form'
     new_form_type = "External Service Information Form"

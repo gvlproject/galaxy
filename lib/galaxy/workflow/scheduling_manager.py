@@ -73,6 +73,7 @@ class WorkflowSchedulingManager( object ):
         workflow_invocation.state = model.WorkflowInvocation.states.NEW
         scheduler = request_params.get( "scheduler", None ) or self.default_scheduler_id
         handler = self._get_handler()
+        log.info("Queueing workflow invocation for handler [%s]" % handler)
 
         workflow_invocation.scheduler = scheduler
         workflow_invocation.handler = handler
@@ -174,6 +175,13 @@ class WorkflowRequestMonitor( object ):
             return False
 
         try:
+            # This ensures we're only ever working on the 'first' active
+            # workflow invocation in a given history, to force sequential
+            # activation.
+            if self.app.config.history_local_serial_workflow_scheduling:
+                for i in workflow_invocation.history.workflow_invocations:
+                    if i.active and i.id < workflow_invocation.id:
+                        return False
             workflow_scheduler.schedule( workflow_invocation )
         except Exception:
             # TODO: eventually fail this - or fail it right away?

@@ -12,7 +12,8 @@ from galaxy import exceptions as glx_exceptions
 from galaxy.managers import sharable
 from galaxy.managers import deletable
 from galaxy.managers import hdas
-from galaxy.managers import collections_util
+# from galaxy.managers import hdcas
+from galaxy.managers import history_contents
 
 
 import logging
@@ -34,6 +35,8 @@ class HistoryManager( sharable.SharableModelManager, deletable.PurgableManagerMi
     def __init__( self, app, *args, **kwargs ):
         super( HistoryManager, self ).__init__( app, *args, **kwargs )
         self.hda_manager = hdas.HDAManager( app )
+        self.contents_manager = history_contents.HistoryContentsManager( app )
+        self.contents_filters = history_contents.HistoryContentsFilters( app )
 
     def copy( self, history, user, **kwargs ):
         """
@@ -74,7 +77,7 @@ class HistoryManager( sharable.SharableModelManager, deletable.PurgableManagerMi
         """
         if self.user_manager.is_anonymous( user ):
             return None if ( not current_history or current_history.deleted ) else current_history
-        desc_update_time = self.model_class.table.c.update_time
+        desc_update_time = desc( self.model_class.table.c.update_time )
         filters = self._munge_filters( filters, self.model_class.user_id == user.id )
         # TODO: normalize this return value
         return self.query( filters=filters, order_by=desc_update_time, limit=1, **kwargs ).first()
@@ -147,6 +150,19 @@ class HistoryManager( sharable.SharableModelManager, deletable.PurgableManagerMi
         raise glx_exceptions.RequestParameterInvalidException( 'Unkown order_by', order_by=order_by_string,
             available=[ 'create_time', 'update_time', 'name', 'size' ])
 
+    def non_ready_jobs( self, history ):
+        """Return the currently running job objects associated with this history.
+
+        Where running is defined as new, waiting, queued, running, resubmitted,
+        and upload.
+        """
+        # TODO: defer to jobModelManager (if there was one)
+        # TODO: genericize the params to allow other filters
+        jobs = ( self.session().query( model.Job )
+            .filter( model.Job.history == history )
+            .filter( model.Job.state.in_( model.Job.non_ready_states ) ) )
+        return jobs
+
 
 class HistorySerializer( sharable.SharableModelSerializer, deletable.PurgableSerializerMixin ):
     """
@@ -161,6 +177,7 @@ class HistorySerializer( sharable.SharableModelSerializer, deletable.PurgableSer
         self.history_manager = self.manager
         self.hda_manager = hdas.HDAManager( app )
         self.hda_serializer = hdas.HDASerializer( app )
+        self.history_contents_serializer = history_contents.HistoryContentsSerializer( app )
 
         self.default_view = 'summary'
         self.add_view( 'summary', [
@@ -178,13 +195,14 @@ class HistorySerializer( sharable.SharableModelSerializer, deletable.PurgableSer
         ])
         self.add_view( 'detailed', [
             'contents_url',
-            # 'hdas',
             'empty',
             'size',
-            # 'nice_size',
             'user_id',
-            'create_time', 'update_time',
-            'importable', 'slug', 'username_and_slug',
+            'create_time',
+            'update_time',
+            'importable',
+            'slug',
+            'username_and_slug',
             'genome_build',
             # TODO: remove the next three - instead getting the same info from the 'hdas' list
             'state',
@@ -194,6 +212,22 @@ class HistorySerializer( sharable.SharableModelSerializer, deletable.PurgableSer
             # 'user_rating',
         ], include_keys_from='summary' )
         # in the Historys' case, each of these views includes the keys from the previous
+
+        #: ..note: this is a custom view for newer (2016/3) UI and should be considered volatile
+        self.add_view( 'dev-detailed', [
+            'contents_url',
+            'size',
+            'user_id',
+            'create_time',
+            'update_time',
+            'importable',
+            'slug',
+            'username_and_slug',
+            'genome_build',
+            # 'contents_states',
+            'contents_active',
+            'hid_counter',
+        ], include_keys_from='summary' )
 
     # assumes: outgoing to json.dumps and sanitized
     def add_serializers( self ):
@@ -215,7 +249,12 @@ class HistorySerializer( sharable.SharableModelSerializer, deletable.PurgableSer
             'hdas'          : lambda i, k, **c: [ self.app.security.encode_id( hda.id ) for hda in i.datasets ],
             'state_details' : self.serialize_state_counts,
             'state_ids'     : self.serialize_state_ids,
-            'contents'      : self.serialize_contents
+            'contents'      : self.serialize_contents,
+            'non_ready_jobs': lambda i, k, **c: [ self.app.security.encode_id( job.id ) for job
+                                                  in self.manager.non_ready_jobs( i ) ],
+
+            'contents_states': self.serialize_contents_states,
+            'contents_active': self.serialize_contents_active,
         })
 
     # remove this
@@ -287,34 +326,32 @@ class HistorySerializer( sharable.SharableModelSerializer, deletable.PurgableSer
 
         return state
 
-    def serialize_contents( self, history, key, trans=None, **context ):
-        contents_dictionaries = []
-        for content in history.contents_iter( types=[ 'dataset', 'dataset_collection' ] ):
-            contents_dict = {}
+    def serialize_contents( self, history, key, trans=None, user=None, **context ):
+        returned = []
+        for content in self.manager.contents_manager._union_of_contents_query( history ).all():
+            serialized = self.history_contents_serializer.serialize_to_view( content,
+                view='summary', trans=trans, user=user )
+            returned.append( serialized )
+        return returned
 
-            if isinstance( content, model.HistoryDatasetAssociation ):
-                contents_dict = self.hda_serializer.serialize_to_view( content,
-                    view='detailed', trans=trans, **context )
-                # TODO: work out: shouldn't history annotations *always* use user=history.user? why anything else?
-                hda_annotation = self.hda_serializer.serialize_annotation( content, 'annotation', user=history.user )
-                contents_dict[ 'annotation' ] = hda_annotation
+    def serialize_contents_states( self, history, key, trans=None, **context ):
+        """
+        Return a dictionary containing the counts of all contents in each state
+        keyed by the distinct states.
 
-            elif isinstance( content, model.HistoryDatasetCollectionAssociation ):
-                contents_dict = self._serialize_collection( trans, content )
+        Note: does not include deleted/hidden contents.
+        """
+        return self.manager.contents_manager.state_counts( history )
 
-            contents_dictionaries.append( contents_dict )
-        return contents_dictionaries
+    def serialize_contents_active( self, history, key, **context ):
+        """
+        Return a dictionary keyed with 'deleted', 'hidden', and 'active' with values
+        for each representing the count of contents in each state.
 
-    # TODO: remove trans
-    def _serialize_collection( self, trans, collection ):
-        service = self.app.dataset_collections_service
-        dataset_collection_instance = service.get_dataset_collection_instance(
-            trans=trans,
-            instance_type='history',
-            id=self.app.security.encode_id( collection.id ),
-        )
-        return collections_util.dictify_dataset_collection_instance( dataset_collection_instance,
-            security=self.app.security, parent=dataset_collection_instance.history, view="element" )
+        Note: counts for deleted and hidden overlap; In other words, a dataset that's
+        both deleted and hidden will be added to both totals.
+        """
+        return self.manager.contents_manager.active_counts( history )
 
 
 class HistoryDeserializer( sharable.SharableModelDeserializer, deletable.PurgableDeserializerMixin ):

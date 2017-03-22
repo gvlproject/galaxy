@@ -2,16 +2,19 @@
 Mock infrastructure for testing ModelManagers.
 """
 import os
-import tempfile
 import shutil
+import tempfile
 
-from galaxy.web import security
-from galaxy import objectstore
+from galaxy import (
+    model,
+    objectstore,
+    quota
+)
+from galaxy.datatypes import registry
+from galaxy.managers import tags
 from galaxy.model import mapping
 from galaxy.util.bunch import Bunch
-
-from galaxy.managers import tags
-from galaxy import quota
+from galaxy.web import security
 
 
 # =============================================================================
@@ -59,6 +62,12 @@ class MockApp( object ):
         self.visualizations_registry = MockVisualizationsRegistry()
         self.tag_handler = tags.GalaxyTagManager( self )
         self.quota_agent = quota.QuotaAgent( self.model )
+        self.init_datatypes()
+
+    def init_datatypes( self ):
+        datatypes_registry = registry.Registry()
+        datatypes_registry.load_datatypes()
+        model.set_datatypes_registry( datatypes_registry )
 
 
 class MockAppConfig( Bunch ):
@@ -68,7 +77,7 @@ class MockAppConfig( Bunch ):
         self.security = security.SecurityHelper( id_secret='bler' )
         self.use_remote_user = kwargs.get( 'use_remote_user', False )
         self.file_path = '/tmp'
-        self.job_working_directory = '/tmp'
+        self.jobs_directory = '/tmp'
         self.new_file_path = '/tmp'
 
         self.object_store_config_file = ''
@@ -81,6 +90,8 @@ class MockAppConfig( Bunch ):
         self.expose_dataset_path = True
         self.allow_user_dataset_purge = True
         self.enable_old_display_applications = True
+
+        self.umask = 0o77
 
         # set by MockDir
         self.root = root
@@ -100,6 +111,7 @@ class MockTrans( object ):
         self.model = self.app.model
         self.webapp = MockWebapp( **kwargs )
         self.sa_session = self.app.model.session
+        self.workflow_building_mode = False
 
         self.galaxy_session = None
         self.__user = user

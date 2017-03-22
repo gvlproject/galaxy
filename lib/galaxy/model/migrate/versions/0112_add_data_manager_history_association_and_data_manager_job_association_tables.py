@@ -1,6 +1,8 @@
 """
 Migration script to add the data_manager_history_association table and data_manager_job_association.
 """
+from __future__ import print_function
+
 import datetime
 import logging
 
@@ -27,19 +29,19 @@ DataManagerJobAssociation_table = Table( "data_manager_job_association", metadat
 
 
 def upgrade(migrate_engine):
-    print __doc__
+    print(__doc__)
     metadata.bind = migrate_engine
     metadata.reflect()
     try:
         DataManagerHistoryAssociation_table.create()
         log.debug( "Created data_manager_history_association table" )
-    except Exception, e:
-        log.debug( "Creating data_manager_history_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating data_manager_history_association table failed.")
     try:
         DataManagerJobAssociation_table.create()
         log.debug( "Created data_manager_job_association table" )
-    except Exception, e:
-        log.debug( "Creating data_manager_job_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Creating data_manager_job_association table failed.")
 
 
 def downgrade(migrate_engine):
@@ -48,10 +50,10 @@ def downgrade(migrate_engine):
     try:
         DataManagerHistoryAssociation_table.drop()
         log.debug( "Dropped data_manager_history_association table" )
-    except Exception, e:
-        log.debug( "Dropping data_manager_history_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping data_manager_history_association table failed.")
     try:
         DataManagerJobAssociation_table.drop()
         log.debug( "Dropped data_manager_job_association table" )
-    except Exception, e:
-        log.debug( "Dropping data_manager_job_association table failed: %s" % str( e ) )
+    except Exception:
+        log.exception("Dropping data_manager_job_association table failed.")
