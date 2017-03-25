@@ -6,8 +6,9 @@ define(['utils/utils',
         'mvc/ui/ui-select-content',
         'mvc/ui/ui-select-library',
         'mvc/ui/ui-select-ftp',
+        'mvc/ui/ui-select-genomespace',
         'mvc/ui/ui-color-picker'],
-    function( Utils, Ui, SelectContent, SelectLibrary, SelectFtp, ColorPicker ) {
+    function( Utils, Ui, SelectContent, SelectLibrary, SelectFtp, SelectGenomeSpace, ColorPicker ) {
 
     // create form view
     return Backbone.Model.extend({
@@ -29,7 +30,8 @@ define(['utils/utils',
             'hidden_data'       : '_fieldHidden',
             'baseurl'           : '_fieldHidden',
             'library_data'      : '_fieldLibrary',
-            'ftpfile'           : '_fieldFtp'
+            'ftpfile'           : '_fieldFtp',
+            'genomespacefile'   : '_fieldGenomeSpace'
         },
 
         /** Returns an input field for a given field type */
@@ -210,6 +212,17 @@ define(['utils/utils',
                 optional    : input_def.optional,
                 multiple    : input_def.multiple,
                 onchange    : input_def.onchange
+            });
+            },
+
+        /** GenomeSpace file select field */
+        _fieldGenomeSpace: function( input_def ) {
+            var self = this;
+            return new SelectGenomeSpace.View({
+                id          : 'field-' + input_def.id,
+                onchange    : function() {
+                    self.app.trigger( 'change' );
+                }
             });
         }
     });
