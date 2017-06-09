@@ -3,7 +3,7 @@
     <description> - receive data from GenomeSpace</description>
     <command><![CDATA[
         export PYTHONPATH=$__root_dir__/lib:\$PYTHONPATH &&
-        $__root_dir__/.venv/bin/python genomespace_importer.py
+        $__root_dir__/.venv/bin/python $__root_dir__/tools/genomespace/genomespace_importer.py
         #set $input_file = $URL.split("^")[0] if "^" in $URL else $URL
         #set $token = $URL.split("^")[1] if "^" in $URL and $URL.split("^")[1] else $__user__.preferences.get( 'genomespace_token', None )
 
