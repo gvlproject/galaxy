@@ -112,6 +112,20 @@ address Docker exposes localhost on to its child containers. This trick
 doesn't work on Mac OS X and so GALAXY_TEST_HOST will need to be crafted
 carefully ahead of time.
 
+For Selenium test cases a stack trace is usually insufficient to diagnose
+problems. For this reason, GALAXY_TEST_ERRORS_DIRECTORY is populated with
+a new directory of information for each failing test case. This information
+includes a screenshot, a stack trace, and the DOM of the currently rendered
+Galaxy instance. The new directories are created with names that include
+information about the failed test method name and the timestamp. By default,
+GALAXY_TEST_ERRORS_DIRECTORY will be set to database/errors.
+
+The Selenium tests seem to be subject to transient failures at a higher
+rate than the rest of the tests in Galaxy. Though this is unfortunate,
+they have more moving pieces so this is perhaps not surprising. One can
+set the GALAXY_TEST_SELENIUM_RETRIES to a number greater than 0 to
+automatically retry every failed test case the specified number of times.
+
 External Tests:
 
 A small subset of tests can be run against an existing Galaxy
@@ -235,16 +249,21 @@ exists() {
     type "$1" >/dev/null 2>/dev/null
 }
 
-ensure_grunt() {
+ensure_grunt_for_qunit() {
     if ! exists "grunt";
     then
-        echo "Grunt not on path, cannot run these tests."
-        exit 1
+        PATH="$PATH:./test/qunit/node_modules/grunt/bin"
+        export PATH
+        if ! exists "grunt";
+        then
+            echo "Grunt not on path, cannot run these tests."
+            exit 1
+        fi
     fi
 }
 
 
-DOCKER_DEFAULT_IMAGE='galaxy/testing-base:17.01.0'
+DOCKER_DEFAULT_IMAGE='galaxy/testing-base:17.05.0'
 
 test_script="./scripts/functional_tests.py"
 report_file="run_functional_tests.html"
@@ -616,7 +635,7 @@ if [ "$driver" = "python" ]; then
     echo "Testing complete. HTML report is in \"$report_file\"." 1>&2
     exit ${exit_status}
 else
-    ensure_grunt
+    ensure_grunt_for_qunit
     if [ -n "$watch" ]; then
         grunt_task="watch"
     else
