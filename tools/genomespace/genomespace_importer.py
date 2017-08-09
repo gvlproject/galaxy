@@ -15,12 +15,12 @@ from galaxy.datatypes.registry import Registry
 GENOMESPACE_EXT_TO_GALAXY_EXT = {'rifles': 'rifles',
                                  'lifes': 'lifes',
                                  'cn': 'cn',
-                                 'GTF': 'gtf',
+                                 'gtf': 'gtf',
                                  'res': 'res',
                                  'xcn': 'xcn',
                                  'lowercasetxt': 'lowercasetxt',
                                  'bed': 'bed',
-                                 'CBS': 'cbs',
+                                 'cbs': 'cbs',
                                  'genomicatab': 'genomicatab',
                                  'gxp': 'gxp',
                                  'reversedtxt': 'reversedtxt',
@@ -28,10 +28,18 @@ GENOMESPACE_EXT_TO_GALAXY_EXT = {'rifles': 'rifles',
                                  'unknown': 'unknown',
                                  'txt': 'txt',
                                  'uppercasetxt': 'uppercasetxt',
-                                 'GISTIC': 'gistic',
-                                 'GFF': 'gff',
+                                 'gistic': 'gistic',
+                                 'gff': 'gff',
                                  'gmt': 'gmt',
-                                 'gct': 'gct'}
+                                 'gct': 'gct',
+                                 'fasta': 'fasta',
+                                 'fna': 'fasta',
+                                 'fa': 'fasta',
+                                 'faa': 'fasta',
+                                 'ffn': 'fasta',
+                                 'fastq': 'fastqsanger',
+                                 'fq': 'fastqsanger',
+                                 'fqz': 'fastqsanger'}
 
 
 def _prepare_json_list( param_list ):
@@ -71,7 +79,7 @@ def exec_before_job( app, inp_data, out_data, param_dict=None, tool=None ):
     Since only tools with tool_type="data_source" provides functionality for having a JSON param file such as this:
     https://wiki.galaxyproject.org/Admin/Tools/DataManagers/DataManagerJSONSyntax#Example_JSON_input_to_tool,
     this hook is used to manually create a similar JSON file.
-    However, this hook does not provide access to GALAXY_DATATYPES_CONF_FILE and GALAXY_DATATYPES_CONF_FILE
+    However, this hook does not provide access to GALAXY_DATATYPES_CONF_FILE and GALAXY_ROOT_DIR
     properties, so these must be passed in as commandline params.
     """
     if param_dict is None:
@@ -91,16 +99,28 @@ def exec_before_job( app, inp_data, out_data, param_dict=None, tool=None ):
         json_params[ 'output_data' ].append( data_dict )
         if json_filename is None:
             json_filename = file_name
-    out = open( json_filename, 'w' )
-    out.write( json.dumps( json_params ) )
-    out.close()
+    with open( json_filename, 'w' ) as out:
+        out.write( json.dumps( json_params ) )
 
 
-def get_galaxy_ext_from_genomespace_format(file_format):
-    return GENOMESPACE_EXT_TO_GALAXY_EXT.get(file_format, None)
+def get_galaxy_ext_from_genomespace_format(format):
+    return GENOMESPACE_EXT_TO_GALAXY_EXT.get(format, None)
+
+
+def get_galaxy_ext_from_file_ext(filename):
+    if not filename:
+        return None
+    filename = filename.lower()
+    ext = filename.rsplit('.', 1)[-1]
+    return get_galaxy_ext_from_genomespace_format(ext, None)
 
 
 def sniff_data_type(json_params, output_file):
+    """
+    The sniff.handle_uploaded_dataset_file() method in Galaxy performs dual
+    functions: it sniffs the filetype and if it's a compressed archive like
+    gzip or bz2, decompresses the file, replacing the original file.
+    """
     try:
         datatypes_registry = Registry()
         datatypes_registry.load_datatypes(
@@ -142,9 +162,8 @@ def determine_file_type(input_url, output_filename, metadata, json_params):
         file_type = sniff_data_type(json_params, output_filename)
 
     # Still no type? Attempt to use filename extension to determine a type
-    if not file_type and '.' in metadata.name:
-        file_ext = metadata.name.rsplit('.', 1)[-1]
-        file_type = get_galaxy_ext_from_genomespace_format(file_ext)
+    if not file_type:
+        file_type = get_galaxy_ext_from_file_ext(metadata.name)
 
     # Nothing works, use default
     if not file_type:
@@ -185,11 +204,14 @@ def download_single_file(gs_client, input_url, json_params,
 
     # 3. Download file
     gs_client.copy(input_url, output_filename)
+    
+    # 4. Decompress file if compressed
+    sniff_data_type(json_params, output_filename)
 
-    # 4. Determine file type from available metadata
+    # 5. Determine file type from available metadata
     file_type = determine_file_type(input_url, output_filename, metadata, json_params)
 
-    # 5. Write job output metadata
+    # 6. Write job output metadata
     save_result_metadata(output_filename, file_type, metadata, json_params,
                          primary_dataset=primary_dataset)
 
