@@ -112,7 +112,7 @@ def get_galaxy_ext_from_file_ext(filename):
         return None
     filename = filename.lower()
     ext = filename.rsplit('.', 1)[-1]
-    return get_galaxy_ext_from_genomespace_format(ext, None)
+    return get_galaxy_ext_from_genomespace_format(ext)
 
 
 def sniff_data_type(json_params, output_file):
