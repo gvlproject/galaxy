@@ -191,6 +191,24 @@ class ToolNotFoundException( Exception ):
     pass
 
 
+def create_tool_from_source( app, tool_source, config_file=None, **kwds ):
+    # Allow specifying a different tool subclass to instantiate
+    tool_module = tool_source.parse_tool_module()
+    if tool_module is not None:
+        module, cls = tool_module
+        mod = __import__( module, globals(), locals(), [cls] )
+        ToolClass = getattr( mod, cls )
+    elif tool_source.parse_tool_type():
+        tool_type = tool_source.parse_tool_type()
+        ToolClass = tool_types.get( tool_type )
+    else:
+        # Normal tool
+        root = getattr( tool_source, 'root', None )
+        ToolClass = Tool
+    tool = ToolClass( config_file, tool_source, app, **kwds )
+    return tool
+
+
 class ToolBox( BaseGalaxyToolBox ):
     """ A derivative of AbstractToolBox with knowledge about Tool internals -
     how to construct them, action types, dependency management, etc....
@@ -228,7 +246,7 @@ class ToolBox( BaseGalaxyToolBox ):
         # Deprecated method, TODO - eliminate calls to this in test/.
         return self._tools_by_id
 
-    def create_tool( self, config_file, repository_id=None, guid=None, **kwds ):
+    def create_tool( self, config_file, **kwds ):
         try:
             tool_source = get_tool_source(
                 config_file,
@@ -239,21 +257,10 @@ class ToolBox( BaseGalaxyToolBox ):
             # capture and log parsing errors
             global_tool_errors.add_error(config_file, "Tool XML parsing", e)
             raise e
-        # Allow specifying a different tool subclass to instantiate
-        tool_module = tool_source.parse_tool_module()
-        if tool_module is not None:
-            module, cls = tool_module
-            mod = __import__( module, globals(), locals(), [cls] )
-            ToolClass = getattr( mod, cls )
-        elif tool_source.parse_tool_type():
-            tool_type = tool_source.parse_tool_type()
-            ToolClass = tool_types.get( tool_type )
-        else:
-            # Normal tool
-            root = getattr( tool_source, 'root', None )
-            ToolClass = Tool
-        tool = ToolClass( config_file, tool_source, self.app, guid=guid, repository_id=repository_id, **kwds )
-        return tool
+        return self._create_tool_from_source( tool_source, config_file=config_file, **kwds )
+
+    def _create_tool_from_source( self, tool_source, **kwds ):
+        return create_tool_from_source( self.app, tool_source, **kwds)
 
     def get_tool_components( self, tool_id, tool_version=None, get_loaded_tools_by_lineage=False, set_selected=False ):
         """
@@ -414,9 +421,8 @@ class Tool( object, Dictifiable ):
         self.guid = guid
         self.old_id = None
         self.version = None
+        self._lineage = None
         self.dependencies = []
-        # Enable easy access to this tool's version lineage.
-        self.lineage_ids = []
         # populate toolshed repository info, if available
         self.populate_tool_shed_info()
         # add tool resource parameters
@@ -440,17 +446,17 @@ class Tool( object, Dictifiable ):
         return self.app.model.context
 
     @property
-    def tool_version( self ):
-        """Return a ToolVersion if one exists for our id"""
-        return self.app.tool_version_cache.tool_version_by_tool_id.get(self.id)
+    def lineage(self):
+        """Return ToolLineage for this tool."""
+        return self._lineage
 
     @property
     def tool_versions( self ):
         # If we have versions, return them.
-        tool_version = self.tool_version
-        if tool_version:
-            return tool_version.get_versions( self.app )
-        return []
+        if self.lineage:
+            return self.lineage.get_versions()
+        else:
+            return []
 
     @property
     def tool_shed_repository( self ):
@@ -583,10 +589,11 @@ class Tool( object, Dictifiable ):
         if not self.id:
             raise Exception( "Missing tool 'id' for tool at '%s'" % tool_source )
 
-        if self.profile >= 16.04 and VERSION_MAJOR < self.profile:
+        profile = LooseVersion(str(self.profile))
+        if profile >= LooseVersion("16.04") and LooseVersion(VERSION_MAJOR) < profile:
             template = "The tool %s targets version %s of Galaxy, you should upgrade Galaxy to ensure proper functioning of this tool."
             message = template % (self.id, self.profile)
-            log.warning(message)
+            raise Exception(message)
 
         # Get the (user visible) name of the tool
         self.name = tool_source.parse_name()
@@ -1795,7 +1802,7 @@ class Tool( object, Dictifiable ):
         if job:
             try:
                 job_params = job.get_param_values( self.app, ignore_errors=True )
-                tool_warnings = self.check_and_update_param_values( job_params, request_context, update_values=False )
+                tool_warnings = self.check_and_update_param_values( job_params, request_context, update_values=True )
                 self._map_source_to_history( request_context, self.inputs, job_params )
                 tool_message = self._compare_tool_version( job )
                 params_to_incoming( kwd, self.inputs, job_params, self.app )
@@ -1832,11 +1839,7 @@ class Tool( object, Dictifiable ):
             tool_help = unicodify( tool_help, 'utf-8' )
 
         # create tool versions
-        tool_versions = []
-        tools = self.app.toolbox.get_loaded_tools_by_lineage( self.id )
-        for t in tools:
-            if t.version not in tool_versions:
-                tool_versions.append( t.version )
+        tool_versions = self.lineage.tool_versions if self.lineage else []  # lineage may be `None` if tool is not loaded into tool panel
 
         # update tool model
         tool_model.update({
@@ -2509,6 +2512,30 @@ class FlattenTool( DatabaseOperationTool ):
                     history.add_dataset(copied_dataset, set_hid=False)
                     new_elements[identifier] = copied_dataset
         add_elements(hdca.collection)
+        output_collections.create_collection(
+            next(iter(self.outputs.values())), "output", elements=new_elements
+        )
+
+
+class SortTool( DatabaseOperationTool ):
+    tool_type = 'sort_collection'
+
+    def produce_outputs( self, trans, out_data, output_collections, incoming, history ):
+        hdca = incoming[ "input" ]
+        sorttype = incoming["sort_type"]
+        new_elements = odict()
+        elements = hdca.collection.elements
+        if sorttype == 'alpha':
+            presort_elements = [(dce.element_identifier, dce) for dce in elements]
+        elif sorttype == 'numeric':
+            presort_elements = [(int(re.sub('[^0-9]', '', dce.element_identifier)), dce) for dce in elements]
+        sorted_elements = [x[1] for x in sorted(presort_elements, key=lambda x: x[0])]
+
+        for dce in sorted_elements:
+            dce_object = dce.element_object
+            copied_dataset = dce_object.copy()
+            history.add_dataset(copied_dataset, set_hid=False)
+            new_elements[dce.element_identifier] = copied_dataset
         output_collections.create_collection(
             next(iter(self.outputs.values())), "output", elements=new_elements
         )

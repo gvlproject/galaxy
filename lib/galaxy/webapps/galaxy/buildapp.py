@@ -103,13 +103,30 @@ def paste_app_factory( global_conf, **kwargs ):
     # The following routes don't bootstrap any information, simply provide the
     # base analysis interface at which point the application takes over.
 
+    webapp.add_client_route( '/admin/users', 'admin' )
+    webapp.add_client_route( '/admin/roles', 'admin' )
+    webapp.add_client_route( '/admin/groups', 'admin' )
+    webapp.add_client_route( '/admin/tool_versions', 'admin' )
+    webapp.add_client_route( '/admin/quotas', 'admin' )
+    webapp.add_client_route( '/admin/forms/{form_id}', 'admin' )
     webapp.add_client_route( '/tours' )
     webapp.add_client_route( '/tours/{tour_id}' )
     webapp.add_client_route( '/user' )
     webapp.add_client_route( '/user/{form_id}' )
     webapp.add_client_route( '/workflow' )
-    webapp.add_client_route( '/pages/{action_id}' )
-    webapp.add_client_route( '/workflow/configure_menu' )
+    webapp.add_client_route( '/workflows/list_published' )
+    webapp.add_client_route( '/visualizations/list_published' )
+    webapp.add_client_route( '/visualizations/list' )
+    webapp.add_client_route( '/pages/list' )
+    webapp.add_client_route( '/pages/list_published' )
+    webapp.add_client_route( '/histories/list' )
+    webapp.add_client_route( '/histories/list_published' )
+    webapp.add_client_route( '/histories/list_shared' )
+    webapp.add_client_route( '/datasets/list' )
+    webapp.add_client_route( '/datasets/edit' )
+    webapp.add_client_route( '/datasets/error' )
+    webapp.add_client_route( '/workflow/run' )
+    webapp.add_client_route( '/workflow/import_workflow' )
     webapp.add_client_route( '/custom_builds' )
 
     # ==== Done
@@ -145,6 +162,8 @@ def paste_app_factory( global_conf, **kwargs ):
 
 
 def uwsgi_app_factory():
+    # TODO: synchronize with galaxy.web.framework.webapp.build_native_uwsgi_app - should
+    # at least be using nice_config_parser for instance.
     import uwsgi
     root = os.path.abspath(uwsgi.opt.get('galaxy_root', os.getcwd()))
     config_file = uwsgi.opt.get('galaxy_config_file', os.path.join(root, 'config', 'galaxy.ini'))
@@ -747,6 +766,7 @@ def populate_api_routes( webapp, app ):
     webapp.mapper.connect( 'job_inputs', '/api/jobs/{id}/inputs', controller='jobs', action='inputs', conditions=dict( method=['GET'] ) )
     webapp.mapper.connect( 'job_outputs', '/api/jobs/{id}/outputs', controller='jobs', action='outputs', conditions=dict( method=['GET'] ) )
     webapp.mapper.connect( 'build_for_rerun', '/api/jobs/{id}/build_for_rerun', controller='jobs', action='build_for_rerun', conditions=dict( method=['GET'] ) )
+    webapp.mapper.connect( 'job_error', '/api/jobs/{id}/error', controller='jobs', action='error', conditions=dict( method=['POST'] ) )
 
     # Job files controllers. Only for consumption by remote job runners.
     webapp.mapper.resource( 'file',
@@ -820,10 +840,28 @@ def populate_api_routes( webapp, app ):
                            conditions=dict( method=[ "GET" ] ) )
 
     webapp.mapper.connect( 'install_repository',
+                           '/api/tool_shed_repositories',
+                           controller='tool_shed_repositories',
+                           action='install_repository_revision',
+                           conditions=dict( method=[ 'POST' ] ) )
+
+    webapp.mapper.connect( 'install_repository',
                            '/api/tool_shed_repositories/install',
                            controller='tool_shed_repositories',
                            action='install',
                            conditions=dict( method=[ 'POST' ] ) )
+
+    webapp.mapper.connect( 'tool_shed_repository',
+                           '/api/tool_shed_repositories',
+                           controller='tool_shed_repositories',
+                           action='uninstall_repository',
+                           conditions=dict( method=[ "DELETE" ]))
+
+    webapp.mapper.connect( 'tool_shed_repository',
+                           '/api/tool_shed_repositories/{id}',
+                           controller='tool_shed_repositories',
+                           action='uninstall_repository',
+                           conditions=dict( method=[ "DELETE" ]))
 
     # Galaxy API for tool shed features.
     webapp.mapper.resource( 'tool_shed_repository',

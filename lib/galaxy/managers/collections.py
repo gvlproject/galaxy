@@ -36,7 +36,7 @@ class DatasetCollectionManager( object ):
 
         self.hda_manager = hdas.HDAManager( app )
         self.history_manager = histories.HistoryManager( app )
-        self.tag_manager = tags.GalaxyTagManager( app )
+        self.tag_manager = tags.GalaxyTagManager( app.model.context )
         self.ldda_manager = lddas.LDDAManager( app )
 
     def create( self, trans, parent, name, collection_type, element_identifiers=None,
@@ -188,6 +188,8 @@ class DatasetCollectionManager( object ):
         assert source == "hdca"  # for now
         source_hdca = self.__get_history_collection_instance( trans, encoded_source_id )
         new_hdca = source_hdca.copy()
+        tags_str = self.tag_manager.get_tags_str(source_hdca.tags)
+        self.tag_manager.apply_item_tags(trans.get_user(), new_hdca, tags_str)
         parent.add_dataset_collection( new_hdca )
         trans.sa_session.add( new_hdca )
         trans.sa_session.flush()

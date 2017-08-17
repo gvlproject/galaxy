@@ -6,6 +6,7 @@ import datetime
 import logging
 import os
 import pwd
+import shlex
 import shutil
 import string
 import subprocess
@@ -100,7 +101,7 @@ def config_exception(e, file):
     abs_path = os.path.abspath(file)
     message = 'Problem parsing the XML in file %s, ' % abs_path
     message += 'please correct the indicated portion of the file and restart Galaxy. '
-    message += str(e)
+    message += unicodify(e)
     log.exception(message)
     return Exception(message)
 
@@ -1027,7 +1028,7 @@ class JobWrapper( object, HasResourceParameters ):
                 # the partial files to the object store regardless of whether job.state == DELETED
                 self.__update_output(job, dataset, clean_only=True)
 
-        self._report_error_to_sentry()
+        self._report_error()
         # Perform email action even on failure.
         for pja in [pjaa.post_job_action for pjaa in job.post_job_actions if pjaa.post_job_action.action_type == "EmailAction"]:
             ActionBox.execute(self.app, self.sa_session, pja, job)
@@ -1215,7 +1216,7 @@ class JobWrapper( object, HasResourceParameters ):
             # need to update all associated output hdas, i.e. history was shared with job running
             for dataset in dataset_assoc.dataset.dataset.history_associations + dataset_assoc.dataset.dataset.library_associations:
                 purged = dataset.dataset.purged
-                if not purged:
+                if not purged and dataset.dataset.external_filename is None:
                     trynum = 0
                     while trynum < self.app.config.retry_job_output_collection:
                         try:
@@ -1436,7 +1437,7 @@ class JobWrapper( object, HasResourceParameters ):
         self.sa_session.flush()
         log.debug( 'job %d ended (finish() executed in %s)' % (self.job_id, finish_timer) )
         if job.state == job.states.ERROR:
-            self._report_error_to_sentry()
+            self._report_error()
         cleanup_job = self.cleanup_job
         delete_files = cleanup_job == 'always' or ( job.state == job.states.OK and cleanup_job == 'onsuccess' )
         self.cleanup( delete_files=delete_files )
@@ -1495,7 +1496,7 @@ class JobWrapper( object, HasResourceParameters ):
     def get_output_sizes( self ):
         sizes = []
         output_paths = self.get_output_fnames()
-        for outfile in [ str( o ) for o in output_paths ]:
+        for outfile in [ unicodify( o ) for o in output_paths ]:
             if os.path.exists( outfile ):
                 sizes.append( ( outfile, os.stat( outfile ).st_size ) )
             else:
@@ -1756,14 +1757,15 @@ class JobWrapper( object, HasResourceParameters ):
 
     def _change_ownership( self, username, gid ):
         job = self.get_job()
-        # FIXME: hardcoded path
         external_chown_script = self.get_destination_configuration("external_chown_script", None)
-        cmd = [ '/usr/bin/sudo', '-E', external_chown_script, self.working_directory, username, str( gid ) ]
-        log.debug( '(%s) Changing ownership of working directory with: %s' % ( job.id, ' '.join( cmd ) ) )
-        p = subprocess.Popen( cmd, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE )
-        # TODO: log stdout/stderr
-        stdout, stderr = p.communicate()
-        assert p.returncode == 0
+        if external_chown_script is not None:
+            cmd = shlex.split(external_chown_script)
+            cmd.extend( [ self.working_directory, username, str( gid ) ] )
+            log.debug( '(%s) Changing ownership of working directory with: %s' % ( job.id, ' '.join( cmd ) ) )
+            p = subprocess.Popen( cmd, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE )
+            # TODO: log stdout/stderr
+            stdout, stderr = p.communicate()
+            assert p.returncode == 0
 
     def change_ownership_for_run( self ):
         job = self.get_job()
@@ -1785,10 +1787,7 @@ class JobWrapper( object, HasResourceParameters ):
     def user_system_pwent( self ):
         if self.__user_system_pwent is None:
             job = self.get_job()
-            try:
-                self.__user_system_pwent = pwd.getpwnam( job.user.email.split('@')[0] )
-            except:
-                pass
+            self.__user_system_pwent = job.user.system_user_pwent(self.app.config.real_system_username)
         return self.__user_system_pwent
 
     @property
@@ -1810,27 +1809,11 @@ class JobWrapper( object, HasResourceParameters ):
             return self.tool.requires_setting_metadata
         return False
 
-    def _report_error_to_sentry( self ):
+    def _report_error( self ):
         job = self.get_job()
         tool = self.app.toolbox.get_tool(job.tool_id, tool_version=job.tool_version) or None
-        if self.app.sentry_client and job.state == job.states.ERROR:
-            self.app.sentry_client.capture(
-                'raven.events.Message',
-                message="Galaxy Job Error: %s  v.%s" % (job.tool_id, job.tool_version),
-                extra={
-                    'info' : job.info,
-                    'id' : job.id,
-                    'command_line' : job.command_line,
-                    'stderr' : job.stderr,
-                    'traceback': job.traceback,
-                    'exit_code': job.exit_code,
-                    'stdout': job.stdout,
-                    'handler': job.handler,
-                    'user': self.user,
-                    'tool_version': job.tool_version,
-                    'tool_xml': tool.config_file if tool else None
-                }
-            )
+        for dataset in job.output_datasets:
+            self.app.error_reports.default_error_plugin.submit_report(dataset, job, tool, user_submission=False)
 
 
 class TaskWrapper(JobWrapper):

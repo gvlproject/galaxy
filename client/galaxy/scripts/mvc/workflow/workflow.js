@@ -1,6 +1,19 @@
 /** Workflow view */
-define( [], function() {
+define( [ 'utils/utils', 'mvc/ui/ui-misc' ], function( Utils, Ui ) {
 
+    /** Build messages after user action */
+    function build_messages() {
+        var $el_message = this.$( '.response-message' ),
+            response = {};
+        response = {
+            'status': Utils.getQueryString( 'status' ),
+            'message': _.escape( Utils.getQueryString( 'message' ) ),
+            'persistent': true,
+            'cls': Utils.getQueryString( 'status' ) + 'message'
+        };
+        $el_message.empty().html( new Ui.Message( response ).$el );
+    }
+ 
     /** View of the main workflow list page */
     var View = Backbone.View.extend({
 
@@ -17,8 +30,8 @@ define( [], function() {
                 // Add workflow header
                 self.$el.empty().append( self._templateHeader() );
                 // Add user actions message if any
-                self.build_messages( self );
-                $el_workflow = self.$el.find( '.user-workflows' );
+                build_messages();
+                $el_workflow = self.$( '.user-workflows' );
                 // Add the actions buttons
                 $el_workflow.append( self._templateActionButtons() );
                 if( workflows.length > 0) {
@@ -26,10 +39,11 @@ define( [], function() {
                     self.adjust_actiondropdown( $el_workflow );
                     // Register delete and run workflow events
                     _.each( workflows, function( wf ) {
-                        self.confirm_delete( self, wf );
+                        self.confirm_delete( wf );
                     });
+                    self.register_show_tool_menu();
                     // Register search workflow event
-                    self.search_workflow( self, self.$el.find( '.search-wf' ), self.$el.find( '.workflow-search tr' ), min_query_length );
+                    self.search_workflow( self.$( '.search-wf' ), self.$( '.workflow-search tr' ), min_query_length );
                 }
                 else {
                     $el_workflow.append( self._templateNoWorkflow() );
@@ -37,25 +51,34 @@ define( [], function() {
             });
         },
 
-        /** Build messages after user action */
-        build_messages: function( self ) {
-            var $el_message = self.$el.find( '.response-message' ),
-                status = self.get_querystring( 'status' ),
-                message = self.get_querystring( 'message' );
-
-            if( message && message !== null && message !== "" ) {
-                $el_message.addClass( status + 'message' );
-                $el_message.html( '<p>' + _.escape(message) + '</p>' );
-            }
-            else {
-                $el_message.html("");
-            }
+        // Save the workflow as an item in Tool panel
+        register_show_tool_menu: function() {
+            var $el_checkboxes = this.$( '.show-in-tool-panel' );
+            $el_checkboxes.on( 'click', function( e ) {
+                var ids = [];
+                // Look for all the checked checkboxes
+                for( var item = 0; item < $el_checkboxes.length; item++ ) {
+                    var checkbox = $el_checkboxes[ item ];
+                    if( checkbox.checked ) {
+                        ids.push( checkbox.value );
+                    }
+                }
+                // Save all the checked workflows
+                $.ajax({
+                    type: 'PUT',
+                    url: Galaxy.root + 'api/workflows/menu/',
+                    data: JSON.stringify( { 'workflow_ids': ids } ),
+                    contentType : 'application/json'
+                }).done( function( response ) {
+                    window.location = Galaxy.root + 'workflow';
+                });
+            });
         },
 
         /** Add confirm box before removing/unsharing workflow */
-        confirm_delete: function( self, workflow ) {
-            var $el_wf_link = self.$el.find( '.link-confirm-' + workflow.id ),
-                $el_shared_wf_link = self.$el.find( '.link-confirm-shared-' + workflow.id );
+        confirm_delete: function( workflow ) {
+            var $el_wf_link = this.$( '.link-confirm-' + workflow.id ),
+                $el_shared_wf_link = this.$( '.link-confirm-shared-' + workflow.id );
             $el_wf_link.click( function() {
                 return confirm( "Are you sure you want to delete workflow '" + workflow.name + "'?" );
             });
@@ -65,7 +88,7 @@ define( [], function() {
         },
 
         /** Implement client side workflow search/filtering */
-        search_workflow: function( self, $el_searchinput, $el_tabletr, min_querylen ) {
+        search_workflow: function( $el_searchinput, $el_tabletr, min_querylen ) {
             $el_searchinput.on( 'keyup', function () {
                 var query = $( this ).val();
                 // Filter when query is at least 3 characters
@@ -84,11 +107,6 @@ define( [], function() {
                     $el_tabletr.show();
                 }
             });
-        },
-
-        /** Get querystrings from url */
-        get_querystring: function( key ) {
-            return decodeURIComponent( window.location.search.replace(new RegExp("^(?:.*[&\\?]" + encodeURIComponent( key ).replace(/[\.\+\*]/g, "\\$&") + "(?:\\=([^&]*))?)?.*$", "i"), "$1") );
         },
 
         /** Ajust the position of dropdown with respect to table */
@@ -133,8 +151,10 @@ define( [], function() {
                         '<th>Owner</th>' +
                         '<th># of Steps</th>' +
                         '<th>Published</th>' +
+                        '<th>Show in tools panel</th>' +
                     '</tr></thead>';
             _.each( workflows, function( wf ) {
+                var checkbox_html = '<input type="checkbox" class="show-in-tool-panel" '+ ( wf.show_in_tool_panel ? 'checked="' + wf.show_in_tool_panel + '"' : "" ) +' value="' + wf.id + '">';
                 trHtml = trHtml + '<tr>' +
                              '<td>' +
                                  '<div class="dropdown">' +
@@ -147,6 +167,7 @@ define( [], function() {
                               '<td>' + ( wf.owner === Galaxy.user.attributes.username ? "You" : wf.owner ) +'</td>' +
                               '<td>' + wf.number_of_steps + '</td>' +
                               '<td>' + ( wf.published ? "Yes" : "No" ) + '</td>' +
+                              '<td>'+ checkbox_html +'</td>' +
                          '</tr>';
             });
             return tableHtml + '<tbody class="workflow-search">' + trHtml + '</tbody></table>';
@@ -157,7 +178,7 @@ define( [], function() {
             if( workflow.owner === Galaxy.user.attributes.username ) {
                 return '<ul class="dropdown-menu action-dpd">' +
                            '<li><a href="'+ Galaxy.root +'workflow/editor?id='+ workflow.id +'">Edit</a></li>' +
-                           '<li><a href="'+ Galaxy.root +'workflow/run?id='+ workflow.id +'" target="galaxy_main">Run</a></li>' +
+                           '<li><a href="'+ Galaxy.root +'workflow/run?id='+ workflow.id +'">Run</a></li>' +
                            '<li><a href="'+ Galaxy.root +'workflow/sharing?id='+ workflow.id +'">Share or Download</a></li>' +
                            '<li><a href="'+ Galaxy.root +'workflow/copy?id='+ workflow.id +'">Copy</a></li>' +
                            '<li><a href="'+ Galaxy.root +'workflow/rename?id='+ workflow.id +'">Rename</a></li>' +
@@ -168,7 +189,7 @@ define( [], function() {
             else {
                 return '<ul class="dropdown-menu action-dpd">' +
                          '<li><a href="'+ Galaxy.root +'workflow/display_by_username_and_slug?username='+ workflow.owner +'&slug='+ workflow.slug +'">View</a></li>' +
-                         '<li><a href="'+ Galaxy.root +'workflow/run?id='+ workflow.id +'" target="galaxy_main">Run</a></li>' +
+                         '<li><a href="'+ Galaxy.root +'workflow/run?id='+ workflow.id +'">Run</a></li>' +
                          '<li><a href="'+ Galaxy.root +'workflow/copy?id='+ workflow.id +'">Copy</a></li>' +
                          '<li><a class="link-confirm-shared-'+ workflow.id +'" href="'+ Galaxy.root +'workflow/sharing?unshare_me=True&id='+ workflow.id +'">Remove</a></li>' +
                       '</ul>';
@@ -182,17 +203,72 @@ define( [], function() {
                            '<div class="response-message"></div>' +
                            '<h2>Your workflows</h2>' +
                        '</div>'+
-                       '<div class="other-options wf">' +
-                           '<h2>Other options</h2>' +
-                           '<a class="action-button fa fa-cog wf-action" href="'+ Galaxy.root +'workflow/configure_menu" title="Configure your workflow menu">' +
-                               '<span>Configure your workflow menu</span>' +
-                           '</a>' +
-                       '</div>' +
                    '</div>';
         }
     });
 
+    var ImportWorkflowView = Backbone.View.extend({
+
+        initialize: function() {
+            this.setElement( '<div/>' );
+            this.render();
+        },
+
+        /** Open page to import workflow */
+        render: function() {
+            var self = this;
+            $.getJSON( Galaxy.root + 'workflow/upload_import_workflow', function( options ) {
+                self.$el.empty().append( self._mainTemplate( options ) );
+            });
+        },
+
+        /** Template for the import workflow page */
+        _mainTemplate: function( options ) {
+            return "<div class='toolForm'>" +
+                       "<div class='toolFormTitle'>Import Galaxy workflow</div>" +
+                        "<div class='toolFormBody'>" +
+                            "<form name='import_workflow' id='import_workflow' action='"+ Galaxy.root + 'workflow/upload_import_workflow' +"' enctype='multipart/form-data' method='POST'>" +
+                            "<div class='form-row'>" +
+                                "<label>Galaxy workflow URL:</label>" + 
+                                "<input type='text' name='url' class='input-url' value='"+ options.url +"' size='40'>" +
+                                "<div class='toolParamHelp' style='clear: both;'>" +
+                                    "If the workflow is accessible via a URL, enter the URL above and click <b>Import</b>." +
+                                "</div>" +
+                                "<div style='clear: both'></div>" +
+                            "</div>" +
+                            "<div class='form-row'>" +
+                                "<label>Galaxy workflow file:</label>" +
+                            "<div class='form-row-input'>" +
+                                "<input type='file' name='file_data' class='input-file'/>" +
+                            "</div>" +
+                            "<div class='toolParamHelp' style='clear: both;'>" +
+                                "If the workflow is in a file on your computer, choose it and then click <b>Import</b>." +
+                            "</div>" +
+                            "<div style='clear: both'></div>" +
+                            "</div>" +
+                            "<div class='form-row'>" +
+                                "<input type='submit' class='primary-button wf-import' name='import_button' value='Import'>" +
+                            "</div>" +
+                            "</form>" +
+                           "<hr/>" +
+                           "<div class='form-row'>" +
+                               "<label>Import a Galaxy workflow from myExperiment:</label>" +
+                               "<div class='form-row-input'>" +
+                                   "<a href='" + options.myexperiment_target_url + "'> Visit myExperiment</a>" +
+                               "</div>" +
+                               "<div class='toolParamHelp' style='clear: both;'>" +
+                                   "Click the link above to visit myExperiment and browse for Galaxy workflows." +
+                               "</div>" +
+                               "<div style='clear: both'></div>" +
+                           "</div>" +
+                       "</div>" +
+                   "</div>";
+        },
+
+    });
+
     return {
-        View  : View
+        View  : View,
+        ImportWorkflowView : ImportWorkflowView
     };
 });

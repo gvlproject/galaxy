@@ -1,10 +1,10 @@
 """
 Determine what optional dependencies are needed.
 """
-import pkg_resources
-
 from os.path import dirname, join
 from xml.etree import ElementTree
+
+import pkg_resources
 
 from galaxy.util import asbool
 from galaxy.util.properties import load_app_properties
@@ -22,7 +22,7 @@ class ConditionalDependencies( object ):
         self.get_conditional_requirements()
 
     def parse_configs( self ):
-        self.config = load_app_properties( ini_file=self.config_file )
+        self.config = load_app_properties( config_file=self.config_file )
         job_conf_xml = self.config.get(
             "job_config_file",
             join( dirname( self.config_file ), 'job_conf.xml' ) )
@@ -108,6 +108,9 @@ class ConditionalDependencies( object ):
 
     def check_azure_storage( self ):
         return 'azure_blob' in self.object_stores
+
+    def check_kamaki(self):
+        return 'pithos' in self.object_stores
 
 
 def optional( config_file ):

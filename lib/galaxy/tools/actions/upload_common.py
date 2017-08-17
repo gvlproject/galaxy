@@ -1,6 +1,6 @@
 import logging
 import os
-import pwd
+import shlex
 import subprocess
 import tempfile
 from cgi import FieldStorage
@@ -11,6 +11,7 @@ from sqlalchemy.orm import eagerload_all
 
 from galaxy import datatypes, util
 from galaxy.exceptions import ObjectInvalid
+from galaxy.managers import tags
 from galaxy.util.odict import odict
 
 log = logging.getLogger( __name__ )
@@ -178,6 +179,11 @@ def __new_library_upload( trans, cntrller, uploaded_dataset, library_bunch, stat
                                                              user=trans.user,
                                                              create_dataset=True,
                                                              sa_session=trans.sa_session )
+    if uploaded_dataset.get( 'tag_using_filenames', False ):
+        tag_from_filename = os.path.splitext( os.path.basename( uploaded_dataset.name ))[0]
+        tag_manager = tags.GalaxyTagManager( trans.sa_session )
+        tag_manager.apply_item_tag( item=ldda, user=trans.user, name='name', value=tag_from_filename )
+
     trans.sa_session.add( ldda )
     if state:
         ldda.state = state
@@ -282,8 +288,10 @@ def create_paramfile( trans, uploaded_datasets ):
     """
     def _chown( path ):
         try:
-            pwent = pwd.getpwnam( trans.user.email.split('@')[0] )
-            cmd = [ '/usr/bin/sudo', '-E', trans.app.config.external_chown_script, path, pwent[0], str( pwent[3] ) ]
+            # get username from email/username
+            pwent = trans.user.system_user_pwent(trans.app.config.real_system_username)
+            cmd = shlex.split(trans.app.config.external_chown_script)
+            cmd.extend( [ path, pwent[0], str( pwent[3] ) ] )
             log.debug( 'Changing ownership of %s with: %s' % ( path, ' '.join( cmd ) ) )
             p = subprocess.Popen( cmd, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE )
             stdout, stderr = p.communicate()
@@ -339,9 +347,11 @@ def create_paramfile( trans, uploaded_datasets ):
                          link_data_only=link_data_only,
                          uuid=uuid_str,
                          to_posix_lines=getattr(uploaded_dataset, "to_posix_lines", True),
+                         auto_decompress=getattr(uploaded_dataset, "auto_decompress", True),
                          purge_source=purge_source,
                          space_to_tab=uploaded_dataset.space_to_tab,
                          in_place=trans.app.config.external_chown_script is None,
+                         check_content=trans.app.config.check_upload_content,
                          path=uploaded_dataset.path )
             # TODO: This will have to change when we start bundling inputs.
             # Also, in_place above causes the file to be left behind since the

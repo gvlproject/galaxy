@@ -16,8 +16,8 @@ define([ 'utils/utils', 'mvc/ui/ui-misc', 'mvc/ui/ui-modal', 'mvc/tool/tool-form
                             icon     : 'fa-check',
                             tooltip  : 'Execute: ' + options.name + ' (' + options.version + ')',
                             title    : 'Execute',
-                            cls      : 'ui-button btn btn-primary',
-                            floating : 'clear',
+                            cls      : 'btn btn-primary ui-clear-float',
+                            wait_cls : 'btn btn-info ui-clear-float',
                             onclick  : function() {
                                 execute_btn.wait();
                                 form.portlet.disable();
@@ -110,7 +110,8 @@ define([ 'utils/utils', 'mvc/ui/ui-misc', 'mvc/ui/ui-modal', 'mvc/tool/tool-form
                     if ( response.jobs && response.jobs.length > 0 ) {
                         self.$el.append( $( '<div/>', { id: 'webhook-view' } ) );
                         var WebhookApp = new Webhooks.WebhookView({
-                            urlRoot: Galaxy.root + 'api/webhooks/tool'
+                            urlRoot: Galaxy.root + 'api/webhooks/tool',
+                            toolId: job_def.tool_id
                         });
                     }
                     parent.Galaxy && parent.Galaxy.currHistoryPanel && parent.Galaxy.currHistoryPanel.refreshContents();

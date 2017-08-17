@@ -7,14 +7,16 @@ import os
 import sys
 import tempfile
 
-import numpy
 from bx.intervals.io import GenomicIntervalReader, ParseError
 from six.moves.urllib.parse import quote_plus
 
 from galaxy import util
 from galaxy.datatypes import metadata
 from galaxy.datatypes.metadata import MetadataElement
-from galaxy.datatypes.sniff import get_headers
+from galaxy.datatypes.sniff import (
+    get_headers,
+    iter_headers
+)
 from galaxy.datatypes.tabular import Tabular
 from galaxy.datatypes.util.gff_util import parse_gff3_attributes, parse_gff_attributes
 from galaxy.web import url_for
@@ -314,14 +316,14 @@ class Interval( Tabular ):
         >>> Interval().sniff( fname )
         True
         """
-        headers = get_headers( filename, '\t' )
         try:
             """
             If we got here, we already know the file is_column_based and is not bed,
             so we'll just look for some valid data.
             """
+            headers = iter_headers( filename, '\t', comment_designator='#' )
             for hdr in headers:
-                if hdr and not hdr[0].startswith( '#' ):
+                if hdr:
                     if len(hdr) < 3:
                         return False
                     try:
@@ -334,20 +336,6 @@ class Interval( Tabular ):
             return True
         except:
             return False
-
-    def get_track_window(self, dataset, data, start, end):
-        """
-        Assumes the incoming track data is sorted already.
-        """
-        window = list()
-        for record in data:
-            fields = record.rstrip("\n\r").split("\t")
-            record_chrom = fields[dataset.metadata.chromCol - 1]
-            record_start = int(fields[dataset.metadata.startCol - 1])
-            record_end = int(fields[dataset.metadata.endCol - 1])
-            if record_start < end and record_end > start:
-                window.append( (record_chrom, record_start, record_end) )  # Yes I did want to use a generator here, but it doesn't work downstream
-        return window
 
     def get_track_resolution( self, dataset, start, end):
         return None
@@ -504,12 +492,12 @@ class Bed( Interval ):
         >>> Bed().sniff( fname )
         True
         """
-        headers = get_headers( filename, '\t' )
+        if not get_headers( filename, '\t', comment_designator='#', count=1 ):
+            return False
         try:
-            if not headers:
-                return False
+            headers = iter_headers( filename, '\t', comment_designator='#' )
             for hdr in headers:
-                if (hdr[0] == '' or hdr[0].startswith( '#' )):
+                if hdr[0] == '':
                     continue
                 valid_col1 = False
                 if len(hdr) < 3 or len(hdr) > 12:
@@ -847,10 +835,10 @@ class Gff( Tabular, _RemoteCallMixin ):
         >>> Gff().sniff( fname )
         True
         """
-        headers = get_headers( filename, '\t' )
+        if len(get_headers( filename, '\t', count=2 )) < 2:
+            return False
         try:
-            if len(headers) < 2:
-                return False
+            headers = iter_headers( filename, '\t' )
             for hdr in headers:
                 if hdr and hdr[0].startswith( '##gff-version' ) and hdr[0].find( '2' ) < 0:
                     return False
@@ -979,10 +967,10 @@ class Gff3( Gff ):
         >>> Gff3().sniff( fname )
         True
         """
-        headers = get_headers( filename, '\t' )
+        if len(get_headers( filename, '\t', count=2 )) < 2:
+            return False
         try:
-            if len(headers) < 2:
-                return False
+            headers = iter_headers( filename, '\t' )
             for hdr in headers:
                 if hdr and hdr[0].startswith( '##gff-version' ) and hdr[0].find( '3' ) >= 0:
                     return True
@@ -1054,10 +1042,10 @@ class Gtf( Gff ):
         >>> Gtf().sniff( fname )
         True
         """
-        headers = get_headers( filename, '\t' )
+        if len(get_headers( filename, '\t', count=2 )) < 2:
+            return False
         try:
-            if len(headers) < 2:
-                return False
+            headers = iter_headers( filename, '\t' )
             for hdr in headers:
                 if hdr and hdr[0].startswith( '##gff-version' ) and hdr[0].find( '2' ) < 0:
                     return False
@@ -1250,34 +1238,14 @@ class Wiggle( Tabular, _RemoteCallMixin ):
         >>> Wiggle().sniff( fname )
         True
         """
-        headers = get_headers( filename, None )
         try:
+            headers = iter_headers( filename, None )
             for hdr in headers:
                 if len(hdr) > 1 and hdr[0] == 'track' and hdr[1].startswith('type=wiggle'):
                     return True
             return False
         except:
             return False
-
-    def get_track_window(self, dataset, data, start, end):
-        """
-        Assumes we have a numpy file.
-        """
-        range = end - start
-        # Determine appropriate resolution to plot ~1000 points
-        resolution = ( 10 ** math.ceil( math.log10( range / 1000 ) ) )
-        # Restrict to valid range
-        resolution = min( resolution, 100000 )
-        resolution = max( resolution, 1 )
-        # Memory map the array (don't load all the data)
-        data = numpy.load( data )
-        # Grab just what we need
-        t_start = math.floor( start / resolution )
-        t_end = math.ceil( end / resolution )
-        x = numpy.arange( t_start, t_end ) * resolution
-        y = data[ t_start : t_end ]
-
-        return list(zip(x.tolist(), y.tolist()))
 
     def get_track_resolution( self, dataset, start, end):
         range = end - start
@@ -1406,7 +1374,7 @@ class CustomTrack ( Tabular ):
         >>> CustomTrack().sniff( fname )
         True
         """
-        headers = get_headers( filename, None )
+        headers = iter_headers( filename, None )
         first_line = True
         for hdr in headers:
             if first_line:

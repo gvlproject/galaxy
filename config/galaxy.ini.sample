@@ -209,8 +209,7 @@ paste.app_factory = galaxy.web.buildapp:app_factory
 # Pass debug flag to conda commands.
 #conda_debug = False
 # conda channels to enable by default (http://conda.pydata.org/docs/custom-channels.html)
-# the recommended channel order is the one from BioConda (https://github.com/bioconda/bioconda-recipes/blob/master/config.yml#L8)
-#conda_ensure_channels = iuc,bioconda,r,defaults,conda-forge
+#conda_ensure_channels = iuc,bioconda,conda-forge,defaults,r
 # Set to True to instruct Galaxy to look for and install missing tool
 # dependencies before each job runs.
 #conda_auto_install = False
@@ -908,12 +907,14 @@ use_interactive = True
 # sub-directories of files contained in their directory.
 #user_library_import_dir = None
 
-# Add an option to the admin library upload tool allowing admins to paste
+# Allow admins to paste filesystem paths during upload. For libraries this
+# adds an option to the admin library upload tool allowing admins to paste
 # filesystem paths to files and directories in a box, and these paths will be
-# added to a library.  Set to True to enable.  Please note the security
+# added to a library.  For history uploads, this allows pasting in paths as URIs.
+# (i.e. prefixed with file://). Set to True to enable.  Please note the security
 # implication that this will give Galaxy Admins access to anything your Galaxy
 # user has access to.
-#allow_library_path_paste = False
+#allow_path_paste = False
 
 # Users may choose to download multiple files from a library in an archive.  By
 # default, Galaxy allows users to select from a few different archive formats
@@ -1306,9 +1307,20 @@ use_interactive = True
 #
 # https://galaxyproject.org/admin/config/performance/cluster
 #
-#drmaa_external_runjob_script = scripts/drmaa_external_runner.py
-#drmaa_external_killjob_script = scripts/drmaa_external_killer.py
-#external_chown_script = scripts/external_chown_script.py
+#drmaa_external_runjob_script = sudo -E scripts/drmaa_external_runner.py --assign_all_groups
+#drmaa_external_killjob_script = sudo -E scripts/drmaa_external_killer.py
+#external_chown_script = sudo -E scripts/external_chown_script.py
+
+# For the job submission as the actual system user, Galaxy can extract 
+# the user name from the email address (actually the local-part before the @) 
+# or the username which are both stored in the Galaxy data base. 
+# The latter option is particularly useful for installations that get the 
+# authentication from LDAP.
+# Also, Galaxy can accept the name of a common system user (eg. galaxy_worker) 
+# who can run every job being submitted. This user should not be the same user 
+# running the galaxy system. 
+# Possible values are user_email (default), username or <common_system_user>
+#real_system_username = user_email 
 
 # File to source to set up the environment when running jobs.  By default, the
 # environment in which the Galaxy server starts is used when running jobs
