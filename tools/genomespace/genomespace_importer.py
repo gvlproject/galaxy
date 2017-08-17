@@ -31,15 +31,7 @@ GENOMESPACE_EXT_TO_GALAXY_EXT = {'rifles': 'rifles',
                                  'gistic': 'gistic',
                                  'gff': 'gff',
                                  'gmt': 'gmt',
-                                 'gct': 'gct',
-                                 'fasta': 'fasta',
-                                 'fna': 'fasta',
-                                 'fa': 'fasta',
-                                 'faa': 'fasta',
-                                 'ffn': 'fasta',
-                                 'fastq': 'fastqsanger',
-                                 'fq': 'fastqsanger',
-                                 'fqz': 'fastqsanger'}
+                                 'gct': 'gct'}
 
 
 def _prepare_json_list( param_list ):
@@ -115,11 +107,11 @@ def get_galaxy_ext_from_file_ext(filename):
     return get_galaxy_ext_from_genomespace_format(ext)
 
 
-def sniff_data_type(json_params, output_file):
+def sniff_and_handle_data_type(json_params, output_file):
     """
     The sniff.handle_uploaded_dataset_file() method in Galaxy performs dual
-    functions: it sniffs the filetype and if it's a compressed archive like
-    gzip or bz2, decompresses the file, replacing the original file.
+    functions: it sniffs the filetype and if it's a compressed archive for
+    a non compressed datatype such as fasta, it will be unpacked.
     """
     try:
         datatypes_registry = Registry()
@@ -149,7 +141,7 @@ def determine_output_filename(input_url, metadata, json_params, primary_dataset)
     return os.path.join(os.getcwd(), output_filename)
 
 
-def determine_file_type(input_url, output_filename, metadata, json_params):
+def determine_file_type(input_url, output_filename, metadata, json_params, sniffed_type):
     """
     Determine the Galaxy data format for this file.
     """
@@ -159,7 +151,7 @@ def determine_file_type(input_url, output_filename, metadata, json_params):
 
     # If genomespace metadata has no identifiable format, attempt to sniff type
     if not file_type:
-        file_type = sniff_data_type(json_params, output_filename)
+        file_type = sniffed_type
 
     # Still no type? Attempt to use filename extension to determine a type
     if not file_type:
@@ -204,12 +196,12 @@ def download_single_file(gs_client, input_url, json_params,
 
     # 3. Download file
     gs_client.copy(input_url, output_filename)
-    
-    # 4. Decompress file if compressed
-    sniff_data_type(json_params, output_filename)
+
+    # 4. Decompress file if compressed and sniff type
+    sniffed_type = sniff_and_handle_data_type(json_params, output_filename)
 
     # 5. Determine file type from available metadata
-    file_type = determine_file_type(input_url, output_filename, metadata, json_params)
+    file_type = determine_file_type(input_url, output_filename, metadata, json_params, sniffed_type)
 
     # 6. Write job output metadata
     save_result_metadata(output_filename, file_type, metadata, json_params,
