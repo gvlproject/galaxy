@@ -20,7 +20,7 @@ cffi==1.11.5
 chardet==3.0.4
 cheetah3==3.1.0
 cliff==2.13.0; python_version >= '2.6'
-cloudbridge==0.3.3
+cloudbridge==1.0.1
 cmd2==0.8.9
 contextlib2==0.5.5; python_version < '3.5'
 cryptography==2.3.1
@@ -93,7 +93,7 @@ pyperclip==1.6.4
 pysam==0.14.1
 python-cinderclient==2.0.1
 python-dateutil==2.7.3
-python-genomespaceclient==0.2
+python-genomespaceclient==1.1.0
 python-glanceclient==2.6.0; python_version != '3.3.*'
 python-keystoneclient==3.10.0; python_version != '3.3.*'
 python-lzo==1.12
